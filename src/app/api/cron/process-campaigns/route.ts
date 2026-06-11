@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
 import { createServerClient } from "@/lib/supabase/server";
 import { sendMessage } from "@/lib/twilio/client";
 import { renderMergeFields } from "@/lib/sms/merge";
@@ -10,11 +11,20 @@ export const maxDuration = 300;
 
 const BATCH_SIZE = 100;
 
-export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get("authorization");
-  const expected = `Bearer ${process.env.CRON_SECRET}`;
+function verifyBearerToken(header: string | null): boolean {
+  const secret = process.env.CRON_SECRET;
+  if (!header || !secret) return false;
+  const expected = `Bearer ${secret}`;
+  if (header.length !== expected.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(header), Buffer.from(expected));
+  } catch {
+    return false;
+  }
+}
 
-  if (!authHeader || authHeader !== expected) {
+export async function GET(req: NextRequest) {
+  if (!verifyBearerToken(req.headers.get("authorization"))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -245,7 +255,7 @@ export async function GET(req: NextRequest) {
             })
             .eq("id", recipient.id);
 
-          console.error(`[cron] Send failed for recipient ${recipient.id}:`, errMsg);
+          console.error(`[cron] Send failed for recipient ${recipient.id}, error code: ${errorCode}`);
           totalProcessed++;
         }
       }

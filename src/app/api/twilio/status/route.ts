@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
+import { validateSignature } from "@/lib/twilio/client";
 
-// Maps Twilio status values to our internal statuses
 const STATUS_MAP: Record<string, string> = {
   queued: "queued",
   sending: "sending",
@@ -13,10 +13,24 @@ const STATUS_MAP: Record<string, string> = {
 
 export async function POST(req: NextRequest) {
   const formData = await req.formData();
-  const twilioSid = String(formData.get("MessageSid") || "");
-  const twilioStatus = String(formData.get("MessageStatus") || "");
-  const errorCode = String(formData.get("ErrorCode") || "");
-  const errorMessage = String(formData.get("ErrorMessage") || "");
+  const params: Record<string, string> = {};
+  formData.forEach((value, key) => {
+    params[key] = String(value);
+  });
+
+  // Validate Twilio signature
+  const signature = req.headers.get("x-twilio-signature") || "";
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://text.salonenvyusa.com").replace(/\/$/, "");
+  const webhookUrl = `${appUrl}/api/twilio/status`;
+
+  if (!validateSignature(webhookUrl, params, signature)) {
+    return NextResponse.json({ error: "Invalid signature" }, { status: 403 });
+  }
+
+  const twilioSid = params.MessageSid || "";
+  const twilioStatus = params.MessageStatus || "";
+  const errorCode = params.ErrorCode || "";
+  const errorMessage = params.ErrorMessage || "";
 
   if (!twilioSid || !twilioStatus) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -24,14 +38,12 @@ export async function POST(req: NextRequest) {
 
   const mappedStatus = STATUS_MAP[twilioStatus];
   if (!mappedStatus) {
-    // Unknown status, just acknowledge
     return NextResponse.json({ ok: true });
   }
 
   try {
     const supabase = createServerClient();
 
-    // Update the message row
     const messageUpdate: Record<string, unknown> = { status: mappedStatus };
     if (mappedStatus === "failed") {
       messageUpdate.error_code = errorCode || null;
@@ -43,7 +55,6 @@ export async function POST(req: NextRequest) {
       .update(messageUpdate)
       .eq("twilio_sid", twilioSid);
 
-    // Update campaign_recipients if this message belongs to a campaign
     const recipientUpdate: Record<string, unknown> = { status: mappedStatus };
     if (mappedStatus === "failed") {
       recipientUpdate.error_code = errorCode || null;
@@ -57,7 +68,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("Status callback error:", (err as Error).message);
-    return NextResponse.json({ ok: true }); // Always 200 so Twilio does not retry
+    console.error("[status] callback error:", (err as Error).message);
+    return NextResponse.json({ ok: true });
   }
 }

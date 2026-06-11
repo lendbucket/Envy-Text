@@ -8,7 +8,6 @@ export async function POST(
 ) {
   const { id } = await params;
 
-  // Quiet hours enforcement on launch
   if (!isWithinQuietHours()) {
     return NextResponse.json(
       { error: getQuietHoursMessage() },
@@ -19,23 +18,35 @@ export async function POST(
   try {
     const supabase = createServerClient();
 
-    // Get the campaign
-    const { data: campaign, error: campErr } = await supabase
+    // Atomic status transition: only succeed if status is still "draft".
+    // This prevents double-submit from creating duplicate recipient queues.
+    const { data: updated, error: updateErr } = await supabase
       .from("campaigns")
-      .select("*")
+      .update({ status: "launching" })
       .eq("id", id)
+      .eq("status", "draft")
+      .select()
       .single();
 
-    if (campErr || !campaign) {
-      return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
-    }
+    if (updateErr || !updated) {
+      // Either not found or status was not "draft" (already launched)
+      const { data: existing } = await supabase
+        .from("campaigns")
+        .select("status")
+        .eq("id", id)
+        .single();
 
-    if (campaign.status !== "draft") {
+      if (!existing) {
+        return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
+      }
+
       return NextResponse.json(
-        { error: `Cannot launch a campaign with status "${campaign.status}"` },
-        { status: 400 }
+        { error: `Cannot launch: campaign is already "${existing.status}"` },
+        { status: 409 }
       );
     }
+
+    const campaign = updated;
 
     // Build audience query
     let contactQuery = supabase
@@ -59,7 +70,7 @@ export async function POST(
       status: "pending",
     }));
 
-    // Also find opted-out contacts for the count
+    // Insert opted-out contacts as skipped
     let optedOutCount = 0;
     if (campaign.audience_type === "all") {
       const { count } = await supabase
@@ -76,7 +87,6 @@ export async function POST(
       optedOutCount = count || 0;
     }
 
-    // Insert skipped rows for opted-out contacts
     if (optedOutCount > 0) {
       let optedOutQuery = supabase
         .from("contacts")
@@ -92,11 +102,8 @@ export async function POST(
           contact_id: c.id,
           status: "skipped_opted_out",
         }));
-        if (skippedRows.length > 0) {
-          // Insert in chunks of 500
-          for (let i = 0; i < skippedRows.length; i += 500) {
-            await supabase.from("campaign_recipients").insert(skippedRows.slice(i, i + 500));
-          }
+        for (let i = 0; i < skippedRows.length; i += 500) {
+          await supabase.from("campaign_recipients").insert(skippedRows.slice(i, i + 500));
         }
       }
     }
@@ -109,11 +116,10 @@ export async function POST(
       if (insertErr) throw insertErr;
     }
 
-    // Apply opt-out suffix to the stored body if toggled on
+    // Apply opt-out suffix and transition to sending
     const finalBody = applyOptOutSuffix(campaign.body, campaign.append_opt_out !== false);
 
-    // Update campaign status to sending
-    const { error: updateErr } = await supabase
+    await supabase
       .from("campaigns")
       .update({
         status: "sending",
@@ -123,15 +129,21 @@ export async function POST(
       })
       .eq("id", id);
 
-    if (updateErr) throw updateErr;
-
     return NextResponse.json({
       ok: true,
       recipients: eligibleContacts.length,
       skipped_opted_out: optedOutCount,
     });
   } catch (err) {
-    console.error("Campaign launch error:", (err as Error).message);
+    // On failure, revert to draft so the operator can retry
+    const supabase = createServerClient();
+    await supabase
+      .from("campaigns")
+      .update({ status: "draft" })
+      .eq("id", id)
+      .eq("status", "launching");
+
+    console.error("[launch] error:", (err as Error).message);
     return NextResponse.json({ error: "Failed to launch campaign" }, { status: 500 });
   }
 }
