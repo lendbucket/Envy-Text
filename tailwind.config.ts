@@ -23,8 +23,8 @@ const config: Config = {
         scheduled: "#9A6B15",
       },
       fontFamily: {
-        sans: ["Archivo", "system-ui", "sans-serif"],
-        display: ["Fraunces", "serif"],
+        sans: ["var(--font-inter)", "system-ui", "sans-serif"],
+        display: ["var(--font-fraunces)", "serif"],
       },
       borderRadius: {
         xl: "0.75rem",

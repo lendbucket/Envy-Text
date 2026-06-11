@@ -16,7 +16,9 @@
       "Bash(mkdir -p src/app/login src/app/api/auth/login src/app/api/twilio/inbound src/app/api/twilio/status src/app/api/cron/process-campaigns src/app/api/settings src/app/\\\\\\(dashboard\\\\\\)/conversations src/app/\\\\\\(dashboard\\\\\\)/contacts src/app/\\\\\\(dashboard\\\\\\)/campaigns src/app/\\\\\\(dashboard\\\\\\)/settings src/app/l/\\\\[code\\\\] src/components src/lib/supabase src/lib/twilio src/lib/sms src/lib/auth)",
       "Bash(mkdir -p supabase/migrations public)",
       "Bash(npm install:*)",
-      "Bash(npx next:*)"
+      "Bash(npx next:*)",
+      "Bash(ls:*)",
+      "Bash(gh repo:*)"
     ]
   }
 }
