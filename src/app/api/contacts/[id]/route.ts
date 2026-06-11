@@ -3,13 +3,14 @@ import { z } from "zod";
 import { createServerClient } from "@/lib/supabase/server";
 
 const updateSchema = z.object({
-  first_name: z.string().optional(),
-  last_name: z.string().optional(),
-  email: z.string().email().optional().or(z.literal("")),
+  first_name: z.string().nullable().optional(),
+  last_name: z.string().nullable().optional(),
+  email: z.string().email().nullable().optional().or(z.literal("")),
   phone: z.string().optional(),
   tags: z.array(z.string()).optional(),
-  notes: z.string().optional(),
+  notes: z.string().nullable().optional(),
   opted_out: z.boolean().optional(),
+  opt_in_source: z.string().nullable().optional(),
 });
 
 export async function PUT(

@@ -18,7 +18,12 @@
       "Bash(npm install:*)",
       "Bash(npx next:*)",
       "Bash(ls:*)",
-      "Bash(gh repo:*)"
+      "Bash(gh repo:*)",
+      "Bash(vercel whoami:*)",
+      "Bash(vercel logs:*)",
+      "Bash(vercel link:*)",
+      "Bash(curl:*)",
+      "mcp__claude_ai_Supabase__apply_migration"
     ]
   }
 }

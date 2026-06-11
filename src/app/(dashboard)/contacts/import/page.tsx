@@ -18,6 +18,7 @@ interface MappedContact {
   first_name: string;
   last_name: string;
   email: string;
+  opt_in_source: string;
 }
 
 interface ValidationResult {
@@ -33,6 +34,7 @@ const FIELD_OPTIONS = [
   { value: "first_name", label: "First name" },
   { value: "last_name", label: "Last name" },
   { value: "email", label: "Email" },
+  { value: "opt_in_source", label: "Opt-in source" },
 ];
 
 function autoDetectMapping(headers: string[]): Record<string, string> {
@@ -51,11 +53,15 @@ function autoDetectMapping(headers: string[]): Record<string, string> {
       mapping[header] = "first_name";
     } else if (/^(email|e-mail|email.?address)$/.test(lower)) {
       mapping[header] = "email";
+    } else if (/^(opt.?in|consent|source|opt.?in.?source)$/i.test(lower)) {
+      mapping[header] = "opt_in_source";
     }
   }
 
   return mapping;
 }
+
+const CLIENT_CHUNK_SIZE = 500;
 
 export default function ImportPage() {
   const router = useRouter();
@@ -73,6 +79,7 @@ export default function ImportPage() {
   } | null>(null);
   const [error, setError] = useState("");
   const [dragOver, setDragOver] = useState(false);
+  const [progress, setProgress] = useState({ current: 0, total: 0 });
 
   const handleFile = useCallback((file: File) => {
     setError("");
@@ -143,7 +150,6 @@ export default function ImportPage() {
   function updateMapping(header: string, field: string) {
     setMapping((prev) => {
       const next = { ...prev };
-      // Clear any other header mapped to this field (except "skip")
       if (field) {
         for (const key of Object.keys(next)) {
           if (next[key] === field && key !== header) {
@@ -167,6 +173,7 @@ export default function ImportPage() {
     const firstNameHeader = Object.entries(mapping).find(([, v]) => v === "first_name")?.[0];
     const lastNameHeader = Object.entries(mapping).find(([, v]) => v === "last_name")?.[0];
     const emailHeader = Object.entries(mapping).find(([, v]) => v === "email")?.[0];
+    const optInHeader = Object.entries(mapping).find(([, v]) => v === "opt_in_source")?.[0];
 
     if (!phoneHeader) {
       setError("Phone column is required.");
@@ -208,6 +215,7 @@ export default function ImportPage() {
         first_name: firstNameHeader ? String(row[firstNameHeader] || "").trim() : "",
         last_name: lastNameHeader ? String(row[lastNameHeader] || "").trim() : "",
         email: emailHeader ? String(row[emailHeader] || "").trim() : "",
+        opt_in_source: optInHeader ? String(row[optInHeader] || "").trim() : "",
       });
     }
 
@@ -215,26 +223,18 @@ export default function ImportPage() {
     let alreadyInDb: string[] = [];
     if (valid.length > 0) {
       try {
-        const phones = valid.map((c) => c.phone);
-        // Check in batches of 200
-        for (let i = 0; i < phones.length; i += 200) {
-          const batch = phones.slice(i, i + 200);
-          const res = await fetch("/api/contacts?" + new URLSearchParams({
-            search: "",
-            limit: "10000",
-          }));
-          if (res.ok) {
-            const data = await res.json();
-            const dbPhones = new Set(
-              (data.contacts || []).map((c: { phone: string }) => c.phone)
-            );
-            for (const phone of batch) {
-              if (dbPhones.has(phone)) {
-                alreadyInDb.push(phone);
-              }
-            }
-            break; // Only need one fetch since we got all contacts
-          }
+        const res = await fetch("/api/contacts?" + new URLSearchParams({
+          search: "",
+          limit: "50000",
+        }));
+        if (res.ok) {
+          const data = await res.json();
+          const dbPhones = new Set(
+            (data.contacts || []).map((c: { phone: string }) => c.phone)
+          );
+          alreadyInDb = valid
+            .filter((c) => dbPhones.has(c.phone))
+            .map((c) => c.phone);
         }
       } catch {
         // Non-fatal, just skip the DB check
@@ -255,29 +255,64 @@ export default function ImportPage() {
       .map((t) => t.trim())
       .filter(Boolean);
 
-    try {
-      const res = await fetch("/api/contacts/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contacts: validation.valid,
-          tags: importTags,
-        }),
-      });
+    const allContacts = validation.valid;
+    const totalChunks = Math.ceil(allContacts.length / CLIENT_CHUNK_SIZE);
+    let totalImported = 0;
+    let totalUpdated = 0;
+    let totalSkipped = 0;
 
-      if (!res.ok) {
+    setProgress({ current: 0, total: allContacts.length });
+
+    for (let i = 0; i < allContacts.length; i += CLIENT_CHUNK_SIZE) {
+      const chunk = allContacts.slice(i, i + CLIENT_CHUNK_SIZE);
+      const chunkNum = Math.floor(i / CLIENT_CHUNK_SIZE) + 1;
+
+      try {
+        const res = await fetch("/api/contacts/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contacts: chunk,
+            tags: importTags,
+          }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json();
+          const detail = data.error || "Unknown server error";
+          setError(
+            `Chunk ${chunkNum} of ${totalChunks} failed: ${detail}. ` +
+            `${totalImported} imported, ${totalUpdated} updated so far. ` +
+            `You can retry and existing contacts will be skipped.`
+          );
+          setStep("review");
+          return;
+        }
+
         const data = await res.json();
-        throw new Error(data.error || "Import failed");
-      }
+        totalImported += data.imported || 0;
+        totalUpdated += data.updated || 0;
+        totalSkipped += data.skipped || 0;
 
-      const data = await res.json();
-      setResult(data);
-      setStep("result");
-    } catch (err) {
-      setError((err as Error).message);
-      setStep("review");
+        setProgress({ current: Math.min(i + CLIENT_CHUNK_SIZE, allContacts.length), total: allContacts.length });
+      } catch (err) {
+        setError(
+          `Network error on chunk ${chunkNum} of ${totalChunks}: ${(err as Error).message}. ` +
+          `${totalImported} imported, ${totalUpdated} updated so far. ` +
+          `You can retry and existing contacts will be skipped.`
+        );
+        setStep("review");
+        return;
+      }
     }
+
+    setResult({ imported: totalImported, updated: totalUpdated, skipped: totalSkipped });
+    setStep("result");
   }
+
+  const progressPercent = progress.total > 0
+    ? Math.round((progress.current / progress.total) * 100)
+    : 0;
 
   return (
     <div className="px-6 py-8 max-w-3xl mx-auto">
@@ -300,7 +335,7 @@ export default function ImportPage() {
       </div>
 
       {error && (
-        <div className="mb-6 p-4 bg-failed/10 border border-failed/20 rounded-xl text-sm text-failed">
+        <div className="mb-6 p-4 bg-failed/10 border border-failed/20 rounded-xl text-sm text-failed whitespace-pre-wrap">
           {error}
         </div>
       )}
@@ -503,7 +538,7 @@ export default function ImportPage() {
                 Invalid rows ({validation.invalid.length})
               </h3>
               <div className="max-h-48 overflow-y-auto space-y-1">
-                {validation.invalid.map((inv, i) => (
+                {validation.invalid.slice(0, 100).map((inv, i) => (
                   <div
                     key={i}
                     className="text-xs text-secondary flex gap-2"
@@ -514,6 +549,11 @@ export default function ImportPage() {
                     <span>{inv.reason}</span>
                   </div>
                 ))}
+                {validation.invalid.length > 100 && (
+                  <p className="text-xs text-secondary pt-1">
+                    ...and {validation.invalid.length - 100} more
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -554,14 +594,28 @@ export default function ImportPage() {
         </div>
       )}
 
-      {/* Step 3.5: Importing progress */}
+      {/* Step 3.5: Importing with progress bar */}
       {step === "importing" && (
-        <div className="bg-panel rounded-xl border border-border p-12 text-center">
-          <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-primary font-medium">Importing contacts...</p>
-          <p className="text-sm text-secondary mt-1">
-            Processing {validation?.valid.length || 0} contacts in chunks
-          </p>
+        <div className="bg-panel rounded-xl border border-border p-12">
+          <div className="max-w-md mx-auto">
+            <p className="text-primary font-medium text-center mb-1">
+              Importing contacts...
+            </p>
+            <p className="text-sm text-secondary text-center mb-6">
+              {progress.current.toLocaleString()} of {progress.total.toLocaleString()} contacts
+            </p>
+
+            {/* Progress bar */}
+            <div className="w-full bg-canvas rounded-full h-3 border border-border overflow-hidden">
+              <div
+                className="h-full bg-accent rounded-full transition-all duration-300"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+            <p className="text-xs text-secondary text-center mt-2 tabular-nums">
+              {progressPercent}%
+            </p>
+          </div>
         </div>
       )}
 
@@ -578,19 +632,19 @@ export default function ImportPage() {
           <div className="grid grid-cols-3 gap-4 max-w-sm mx-auto mt-6 mb-6">
             <div className="text-center">
               <p className="text-2xl font-semibold text-delivered tabular-nums">
-                {result.imported}
+                {result.imported.toLocaleString()}
               </p>
               <p className="text-xs text-secondary mt-1">Imported</p>
             </div>
             <div className="text-center">
               <p className="text-2xl font-semibold text-scheduled tabular-nums">
-                {result.updated}
+                {result.updated.toLocaleString()}
               </p>
               <p className="text-xs text-secondary mt-1">Updated</p>
             </div>
             <div className="text-center">
               <p className="text-2xl font-semibold text-secondary tabular-nums">
-                {result.skipped}
+                {result.skipped.toLocaleString()}
               </p>
               <p className="text-xs text-secondary mt-1">Skipped</p>
             </div>

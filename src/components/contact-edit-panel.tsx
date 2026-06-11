@@ -14,6 +14,7 @@ export interface Contact {
   notes: string | null;
   opted_out: boolean;
   opted_out_at: string | null;
+  opt_in_source: string | null;
   source: string | null;
   created_at: string;
   updated_at: string;
@@ -34,6 +35,7 @@ export function ContactEditPanel({ contact, onClose, onSaved }: Props) {
     tags: contact.tags.join(", "),
     notes: contact.notes || "",
     opted_out: contact.opted_out,
+    opt_in_source: contact.opt_in_source || "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -60,6 +62,7 @@ export function ContactEditPanel({ contact, onClose, onSaved }: Props) {
           tags,
           notes: form.notes || null,
           opted_out: form.opted_out,
+          opt_in_source: form.opt_in_source || null,
         }),
       });
 
@@ -165,6 +168,20 @@ export function ContactEditPanel({ contact, onClose, onSaved }: Props) {
             onChange={(e) => setForm({ ...form, notes: e.target.value })}
             rows={3}
             className="w-full px-3 py-2 border border-border rounded-lg bg-panel text-primary resize-none focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
+          />
+        </div>
+
+        <div>
+          <label htmlFor="edit-opt-in-source" className="block text-sm font-medium text-primary mb-1">
+            Opt-in source
+          </label>
+          <input
+            id="edit-opt-in-source"
+            type="text"
+            value={form.opt_in_source}
+            onChange={(e) => setForm({ ...form, opt_in_source: e.target.value })}
+            placeholder="e.g. website form, in-store signup, import"
+            className="w-full px-3 py-2 border border-border rounded-lg bg-panel text-primary placeholder:text-secondary/50 focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
           />
         </div>
 
