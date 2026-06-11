@@ -13,22 +13,60 @@ function emptyTwiml() {
 }
 
 export async function POST(req: NextRequest) {
+  // Diagnostic logging: confirm the route is being hit
+  console.log("[inbound] Request received", {
+    method: req.method,
+    contentType: req.headers.get("content-type"),
+    hasSignature: !!req.headers.get("x-twilio-signature"),
+    authTokenLength: (process.env.TWILIO_AUTH_TOKEN || "").length,
+    appUrl: process.env.NEXT_PUBLIC_APP_URL || "NOT SET",
+  });
+
   // Parse form body (Twilio sends application/x-www-form-urlencoded)
-  const formData = await req.formData();
-  const params: Record<string, string> = {};
-  formData.forEach((value, key) => {
-    params[key] = String(value);
+  let params: Record<string, string> = {};
+  try {
+    const formData = await req.formData();
+    formData.forEach((value, key) => {
+      params[key] = String(value);
+    });
+  } catch (parseErr) {
+    console.error("[inbound] Failed to parse form data:", (parseErr as Error).message);
+    return emptyTwiml();
+  }
+
+  console.log("[inbound] Parsed params", {
+    from: params.From ? `+***${params.From.slice(-4)}` : "MISSING",
+    messageSid: params.MessageSid || "MISSING",
+    bodyLength: (params.Body || "").length,
+    numMedia: params.NumMedia || "0",
+    paramKeys: Object.keys(params).join(", "),
   });
 
   // Validate Twilio signature
-  const signature = req.headers.get("x-twilio-signature") || "";
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://text.salonenvyusa.com";
+  // Use NEXT_PUBLIC_APP_URL to reconstruct the exact URL Twilio was configured to call.
+  // Never trust req.url or host headers behind a reverse proxy.
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://text.salonenvyusa.com").replace(/\/$/, "");
   const webhookUrl = `${appUrl}/api/twilio/inbound`;
 
+  const signature = req.headers.get("x-twilio-signature") || "";
+  console.log("[inbound] Signature validation", {
+    webhookUrl,
+    signaturePresent: !!signature,
+    signatureLength: signature.length,
+  });
+
   if (!validateSignature(webhookUrl, params, signature)) {
-    console.error("Twilio signature validation failed");
+    console.error("[inbound] Signature validation FAILED", {
+      webhookUrl,
+      signatureLength: signature.length,
+      authTokenLength: (process.env.TWILIO_AUTH_TOKEN || "").length,
+    });
+    // Log what URL Twilio might have actually called for debugging
+    console.error("[inbound] If Twilio called a different URL than the one above, the signature will never match. Check the Messaging Service webhook URL in Twilio Console.");
     return NextResponse.json({ error: "Invalid signature" }, { status: 403 });
   }
+
+  console.log("[inbound] Signature validated OK");
 
   const from = params.From || "";
   const body = (params.Body || "").trim();
@@ -42,7 +80,10 @@ export async function POST(req: NextRequest) {
     if (url) mediaUrls.push(url);
   }
 
-  if (!from) return emptyTwiml();
+  if (!from) {
+    console.error("[inbound] No From field in params");
+    return emptyTwiml();
+  }
 
   try {
     const supabase = createServerClient();
@@ -62,6 +103,7 @@ export async function POST(req: NextRequest) {
         .single();
 
       if (insertErr) {
+        console.error("[inbound] Contact insert error:", insertErr.message);
         // Race condition: another request created it
         const { data: existing } = await supabase
           .from("contacts")
@@ -75,9 +117,11 @@ export async function POST(req: NextRequest) {
     }
 
     if (!contact) {
-      console.error("Failed to resolve contact for phone");
+      console.error("[inbound] Failed to resolve contact");
       return emptyTwiml();
     }
+
+    console.log("[inbound] Contact resolved", { contactId: contact.id });
 
     // Handle opt-out/opt-in keywords
     const bodyLower = body.toLowerCase();
@@ -86,11 +130,13 @@ export async function POST(req: NextRequest) {
         .from("contacts")
         .update({ opted_out: true, opted_out_at: new Date().toISOString() })
         .eq("id", contact.id);
+      console.log("[inbound] Opt-out processed");
     } else if (OPT_IN_KEYWORDS.includes(bodyLower)) {
       await supabase
         .from("contacts")
         .update({ opted_out: false, opted_out_at: null })
         .eq("id", contact.id);
+      console.log("[inbound] Opt-in processed");
     }
 
     // Upsert conversation
@@ -103,7 +149,7 @@ export async function POST(req: NextRequest) {
     const preview = body.length > 80 ? body.slice(0, 80) + "..." : body || "[Media]";
 
     if (!conversation) {
-      const { data: newConv } = await supabase
+      const { data: newConv, error: convErr } = await supabase
         .from("conversations")
         .insert({
           contact_id: contact.id,
@@ -113,6 +159,9 @@ export async function POST(req: NextRequest) {
         })
         .select("id, unread_count")
         .single();
+      if (convErr) {
+        console.error("[inbound] Conversation insert error:", convErr.message);
+      }
       conversation = newConv;
     } else {
       await supabase
@@ -126,18 +175,27 @@ export async function POST(req: NextRequest) {
     }
 
     if (!conversation) {
-      console.error("Failed to resolve conversation");
+      console.error("[inbound] Failed to resolve conversation");
       return emptyTwiml();
     }
 
     // Insert message
-    await supabase.from("messages").insert({
+    const { error: msgErr } = await supabase.from("messages").insert({
       conversation_id: conversation.id,
       direction: "inbound",
       body: body || null,
       media_urls: mediaUrls,
       status: "received",
       twilio_sid: twilioSid,
+    });
+
+    if (msgErr) {
+      console.error("[inbound] Message insert error:", msgErr.message);
+    }
+
+    console.log("[inbound] Message stored", {
+      conversationId: conversation.id,
+      messageSid: twilioSid,
     });
 
     // Reply attribution: check for recent campaign sends to this contact
@@ -160,9 +218,10 @@ export async function POST(req: NextRequest) {
         .eq("id", recentRecipient.id);
     }
 
+    console.log("[inbound] Complete, returning TwiML");
     return emptyTwiml();
   } catch (err) {
-    console.error("Inbound webhook error:", (err as Error).message);
+    console.error("[inbound] Unhandled error:", (err as Error).message);
     return emptyTwiml();
   }
 }
