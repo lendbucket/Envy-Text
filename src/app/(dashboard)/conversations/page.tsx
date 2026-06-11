@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Search, MessageSquare, ChevronDown, ChevronUp } from "lucide-react";
+import { Search, MessageSquare, ChevronDown, ChevronUp, ArrowLeft } from "lucide-react";
 import { formatPhone } from "@/lib/phone";
 import { MessageThread } from "@/components/message-thread";
 import { MessageComposer } from "@/components/message-composer";
@@ -206,7 +206,7 @@ export default function ConversationsPage() {
   return (
     <div className="flex h-full">
       {/* Left pane: conversation list */}
-      <div className="w-80 border-r border-border bg-panel flex flex-col shrink-0">
+      <div className={`w-full lg:w-80 border-r border-border bg-panel flex flex-col shrink-0 ${activeId ? "hidden lg:flex" : "flex"}`}>
         {/* Search */}
         <div className="p-3 border-b border-border space-y-2">
           <div className="relative">
@@ -302,7 +302,7 @@ export default function ConversationsPage() {
       </div>
 
       {/* Right pane: message thread */}
-      <div className="flex-1 flex flex-col bg-panel">
+      <div className={`flex-1 flex flex-col bg-panel ${!activeId ? "hidden lg:flex" : "flex"}`}>
         {!activeId ? (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
@@ -318,13 +318,21 @@ export default function ConversationsPage() {
             {activeConversation && (
               <div className="border-b border-border">
                 <div className="px-4 py-3 flex items-center justify-between">
-                  <div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setActiveId(null)}
+                      className="lg:hidden p-1 text-secondary hover:text-primary transition-colors rounded-lg"
+                    >
+                      <ArrowLeft className="w-5 h-5" />
+                    </button>
+                    <div>
                     <h3 className="text-sm font-semibold text-primary">
                       {contactName(activeConversation.contacts)}
                     </h3>
                     <p className="text-xs text-secondary tabular-nums">
                       {formatPhone(activeConversation.contacts.phone)}
                     </p>
+                    </div>
                   </div>
                   <button
                     onClick={() => setShowContactInfo(!showContactInfo)}

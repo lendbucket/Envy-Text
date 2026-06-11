@@ -3,6 +3,7 @@
 import { useState, useRef, KeyboardEvent } from "react";
 import { Send } from "lucide-react";
 import { analyzeMessage } from "@/lib/sms/segments";
+import { ImageUpload } from "@/components/image-upload";
 
 interface Props {
   conversationId: string;
@@ -18,20 +19,24 @@ interface Props {
 
 export function MessageComposer({ conversationId, pricing, disabled, onSent }: Props) {
   const [body, setBody] = useState("");
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const segmentInfo = analyzeMessage(body, false);
+  const hasMedia = !!mediaUrl;
+  const segmentInfo = analyzeMessage(body, hasMedia);
 
   let costPerMessage = 0;
-  if (segmentInfo.segmentCount > 0) {
+  if (hasMedia) {
+    costPerMessage = pricing.mms_price + pricing.carrier_fee_per_mms;
+  } else if (segmentInfo.segmentCount > 0) {
     costPerMessage =
       segmentInfo.segmentCount * pricing.sms_price_per_segment +
       segmentInfo.segmentCount * pricing.carrier_fee_per_sms;
   }
 
   async function handleSend() {
-    if (!body.trim() || sending || disabled) return;
+    if ((!body.trim() && !mediaUrl) || sending || disabled) return;
     setSending(true);
 
     try {
@@ -40,14 +45,15 @@ export function MessageComposer({ conversationId, pricing, disabled, onSent }: P
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           conversation_id: conversationId,
-          body: body.trim(),
+          body: body.trim() || "",
+          media_urls: mediaUrl ? [mediaUrl] : [],
         }),
       });
 
       if (res.ok) {
         setBody("");
+        setMediaUrl(null);
         onSent();
-        // Refocus textarea
         setTimeout(() => textareaRef.current?.focus(), 50);
       }
     } catch {
@@ -66,6 +72,15 @@ export function MessageComposer({ conversationId, pricing, disabled, onSent }: P
 
   return (
     <div className="border-t border-border bg-panel px-4 py-3">
+      {mediaUrl && (
+        <div className="mb-2">
+          <ImageUpload
+            currentUrl={mediaUrl}
+            onUploaded={setMediaUrl}
+            onRemove={() => setMediaUrl(null)}
+          />
+        </div>
+      )}
       <div className="flex gap-3 items-end">
         <div className="flex-1">
           <textarea
@@ -80,10 +95,12 @@ export function MessageComposer({ conversationId, pricing, disabled, onSent }: P
           />
           <div className="flex items-center justify-between mt-1 px-1">
             <div className="flex items-center gap-3 text-xs text-secondary tabular-nums">
-              <span>{segmentInfo.charCount} chars</span>
-              <span>{segmentInfo.encoding}</span>
+              {!mediaUrl && <ImageUpload onUploaded={setMediaUrl} />}
+              <span>{hasMedia ? "MMS" : segmentInfo.encoding}</span>
               <span>
-                {segmentInfo.segmentCount} segment{segmentInfo.segmentCount !== 1 ? "s" : ""}
+                {hasMedia
+                  ? "1 message"
+                  : `${segmentInfo.segmentCount} segment${segmentInfo.segmentCount !== 1 ? "s" : ""}`}
               </span>
             </div>
             {costPerMessage > 0 && (
@@ -95,7 +112,7 @@ export function MessageComposer({ conversationId, pricing, disabled, onSent }: P
         </div>
         <button
           onClick={handleSend}
-          disabled={!body.trim() || sending || disabled}
+          disabled={(!body.trim() && !mediaUrl) || sending || disabled}
           className="p-2.5 bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-accent/30 focus:ring-offset-2 shrink-0"
           title="Send (Enter)"
         >
