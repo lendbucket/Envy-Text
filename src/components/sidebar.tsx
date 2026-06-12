@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  BarChart3,
   MessageSquare,
   Users,
   Megaphone,
@@ -13,6 +14,7 @@ import {
 } from "lucide-react";
 
 const navItems = [
+  { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
   { href: "/conversations", label: "Conversations", icon: MessageSquare },
   { href: "/contacts", label: "Contacts", icon: Users },
   { href: "/campaigns", label: "Campaigns", icon: Megaphone },

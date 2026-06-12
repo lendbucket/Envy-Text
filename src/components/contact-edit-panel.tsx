@@ -1,8 +1,18 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useState, useEffect, FormEvent } from "react";
 import { X } from "lucide-react";
 import { formatPhone } from "@/lib/phone";
+import Link from "next/link";
+
+interface CampaignHistory {
+  campaign_id: string;
+  campaign_name: string;
+  delivery_status: string;
+  sent_at: string | null;
+  replied: boolean;
+  clicks: number;
+}
 
 export interface Contact {
   id: string;
@@ -39,6 +49,16 @@ export function ContactEditPanel({ contact, onClose, onSaved }: Props) {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [history, setHistory] = useState<CampaignHistory[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`/api/contacts/${contact.id}/history`)
+      .then((r) => r.json())
+      .then((d) => setHistory(d.history || []))
+      .catch(() => {})
+      .finally(() => setHistoryLoading(false));
+  }, [contact.id]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -196,6 +216,43 @@ export function ContactEditPanel({ contact, onClose, onSaved }: Props) {
           <label htmlFor="edit-opted-out" className="text-sm text-primary">
             Opted out of messaging
           </label>
+        </div>
+
+        {/* Campaign history */}
+        <div className="border-t border-border pt-4">
+          <h4 className="text-sm font-semibold text-primary mb-3">Campaign history</h4>
+          {historyLoading ? (
+            <p className="text-xs text-secondary">Loading...</p>
+          ) : history.length === 0 ? (
+            <p className="text-xs text-secondary">No campaigns received</p>
+          ) : (
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {history.map((h) => (
+                <div key={h.campaign_id} className="flex items-center justify-between text-xs border-b border-border pb-2 last:border-b-0">
+                  <div className="min-w-0">
+                    <Link
+                      href={`/campaigns/${h.campaign_id}`}
+                      className="text-accent hover:underline truncate block"
+                    >
+                      {h.campaign_name}
+                    </Link>
+                    <div className="flex items-center gap-2 mt-0.5 text-secondary">
+                      <span className={h.delivery_status === "delivered" ? "text-delivered" : h.delivery_status === "failed" ? "text-failed" : ""}>
+                        {h.delivery_status}
+                      </span>
+                      {h.replied && <span className="text-accent">replied</span>}
+                      {h.clicks > 0 && <span>{h.clicks} click{h.clicks !== 1 ? "s" : ""}</span>}
+                    </div>
+                  </div>
+                  {h.sent_at && (
+                    <span className="text-secondary tabular-nums shrink-0 ml-2">
+                      {new Date(h.sent_at).toLocaleDateString()}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </form>
 

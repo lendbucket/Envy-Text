@@ -55,3 +55,26 @@ export function validateSignature(
   if (!token) return false;
   return twilio.validateRequest(token, signature, url, params);
 }
+
+export async function fetchMessagePrice(
+  sid: string
+): Promise<{ price: number; segments: number } | null> {
+  const tw = getClient();
+  const msg = await tw.messages(sid).fetch();
+  if (msg.price && msg.numSegments) {
+    return {
+      price: Math.abs(parseFloat(msg.price)),
+      segments: parseInt(msg.numSegments, 10),
+    };
+  }
+  return null;
+}
+
+export async function lookupNumber(
+  phone: string
+): Promise<{ lineType: string | null }> {
+  const tw = getClient();
+  const lookup = await tw.lookups.v2.phoneNumbers(phone).fetch({ fields: "line_type_intelligence" });
+  const lineType = lookup.lineTypeIntelligence?.type || null;
+  return { lineType };
+}

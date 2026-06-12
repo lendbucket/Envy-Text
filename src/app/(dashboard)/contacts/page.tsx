@@ -11,6 +11,7 @@ import {
   ChevronUp,
   ChevronDown,
   X,
+  Phone,
 } from "lucide-react";
 import { formatPhone } from "@/lib/phone";
 import { ContactEditPanel, type Contact } from "@/components/contact-edit-panel";
@@ -34,6 +35,12 @@ export default function ContactsPage() {
   const [showBulkTag, setShowBulkTag] = useState(false);
   const [bulkTagInput, setBulkTagInput] = useState("");
   const [bulkTagLoading, setBulkTagLoading] = useState(false);
+
+  // Lookup modal state
+  const [showLookup, setShowLookup] = useState(false);
+  const [lookupEstimate, setLookupEstimate] = useState<{ count: number; estimated_cost: number; message: string } | null>(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupResult, setLookupResult] = useState("");
 
   // Add contact modal
   const [showAdd, setShowAdd] = useState(false);
@@ -315,6 +322,31 @@ export default function ContactsPage() {
               Tag
             </button>
             <button
+              onClick={async () => {
+                setLookupLoading(true);
+                setLookupResult("");
+                try {
+                  const res = await fetch("/api/contacts/lookup", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ contact_ids: Array.from(selected), confirmed: false }),
+                  });
+                  const data = await res.json();
+                  setLookupEstimate(data);
+                  setShowLookup(true);
+                } catch {
+                  setLookupResult("Failed to get estimate.");
+                } finally {
+                  setLookupLoading(false);
+                }
+              }}
+              disabled={lookupLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium border border-border rounded-lg text-secondary hover:text-primary transition-colors focus:outline-none focus:ring-2 focus:ring-accent/30"
+            >
+              <Phone className="w-3.5 h-3.5" />
+              {lookupLoading ? "Checking..." : "Check line types"}
+            </button>
+            <button
               onClick={handleBulkDelete}
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium border border-failed/30 rounded-lg text-failed hover:bg-failed/10 transition-colors focus:outline-none focus:ring-2 focus:ring-failed/30"
             >
@@ -514,6 +546,59 @@ export default function ContactsPage() {
                 className="px-4 py-2 text-sm font-medium bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-accent/30 focus:ring-offset-2"
               >
                 {bulkTagLoading ? "Tagging..." : "Apply tags"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Lookup confirmation modal */}
+      {showLookup && lookupEstimate && (
+        <div className="fixed inset-0 bg-primary/30 flex items-center justify-center z-50">
+          <div className="bg-panel rounded-xl border border-border p-6 w-full max-w-sm shadow-lg">
+            <h3 className="text-lg font-semibold text-primary mb-2">
+              Check line types
+            </h3>
+            <p className="text-sm text-secondary mb-4">
+              {lookupEstimate.message}
+            </p>
+            {lookupResult && (
+              <p className="text-sm text-delivered mb-4">{lookupResult}</p>
+            )}
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setShowLookup(false);
+                  setLookupEstimate(null);
+                  setLookupResult("");
+                }}
+                className="px-4 py-2 text-sm border border-border rounded-lg text-secondary hover:text-primary transition-colors focus:outline-none focus:ring-2 focus:ring-accent/30"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setLookupLoading(true);
+                  try {
+                    const res = await fetch("/api/contacts/lookup", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ contact_ids: Array.from(selected), confirmed: true }),
+                    });
+                    const data = await res.json();
+                    setLookupResult(data.message || "Lookup complete.");
+                    fetchContacts();
+                    fetchTags();
+                  } catch {
+                    setLookupResult("Lookup failed.");
+                  } finally {
+                    setLookupLoading(false);
+                  }
+                }}
+                disabled={lookupLoading || !!lookupResult}
+                className="px-4 py-2 text-sm font-medium bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-accent/30 focus:ring-offset-2"
+              >
+                {lookupLoading ? "Looking up..." : "Run lookup"}
               </button>
             </div>
           </div>

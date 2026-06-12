@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
-import { validateSignature } from "@/lib/twilio/client";
+import { validateSignature, fetchMessagePrice } from "@/lib/twilio/client";
 
 const STATUS_MAP: Record<string, string> = {
   queued: "queued",
@@ -50,6 +50,19 @@ export async function POST(req: NextRequest) {
       messageUpdate.error_message = errorMessage || null;
     }
 
+    // On delivered or failed, fetch actual price from Twilio
+    if (mappedStatus === "delivered" || mappedStatus === "failed") {
+      try {
+        const priceInfo = await fetchMessagePrice(twilioSid);
+        if (priceInfo) {
+          messageUpdate.actual_price = priceInfo.price;
+          messageUpdate.actual_segments = priceInfo.segments;
+        }
+      } catch {
+        // Non-critical: price fetch can fail without blocking status update
+      }
+    }
+
     await supabase
       .from("messages")
       .update(messageUpdate)
@@ -59,6 +72,10 @@ export async function POST(req: NextRequest) {
     if (mappedStatus === "failed") {
       recipientUpdate.error_code = errorCode || null;
       recipientUpdate.error_message = errorMessage || null;
+    }
+    if (messageUpdate.actual_price !== undefined) {
+      recipientUpdate.actual_price = messageUpdate.actual_price;
+      recipientUpdate.actual_segments = messageUpdate.actual_segments;
     }
 
     await supabase

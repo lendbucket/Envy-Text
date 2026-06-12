@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
 import { createServerClient } from "@/lib/supabase/server";
-import { sendMessage } from "@/lib/twilio/client";
+import { sendMessage, fetchMessagePrice } from "@/lib/twilio/client";
 import { renderMergeFields } from "@/lib/sms/merge";
 import { applyOptOutSuffix, isWithinQuietHours } from "@/lib/sms/compliance";
 import { extractUrls, generateShortCode, replaceUrlsWithTracked } from "@/lib/sms/links";
@@ -275,7 +275,49 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ processed: totalProcessed });
+    // Step 3: Backfill actual prices for delivered rows missing price data
+    const { data: missingPrices } = await supabase
+      .from("campaign_recipients")
+      .select("id, twilio_sid")
+      .in("status", ["delivered", "failed"])
+      .is("actual_price", null)
+      .not("twilio_sid", "is", null)
+      .limit(20);
+
+    let backfilled = 0;
+    for (const row of missingPrices || []) {
+      try {
+        const priceInfo = await fetchMessagePrice(row.twilio_sid);
+        if (priceInfo) {
+          await supabase
+            .from("campaign_recipients")
+            .update({
+              actual_price: priceInfo.price,
+              actual_segments: priceInfo.segments,
+            })
+            .eq("id", row.id);
+
+          // Also update the messages table
+          await supabase
+            .from("messages")
+            .update({
+              actual_price: priceInfo.price,
+              actual_segments: priceInfo.segments,
+            })
+            .eq("twilio_sid", row.twilio_sid);
+
+          backfilled++;
+        }
+      } catch {
+        // Non-critical: skip this row and try next time
+      }
+    }
+
+    if (backfilled > 0) {
+      console.log(`[cron] Backfilled actual prices for ${backfilled} messages`);
+    }
+
+    return NextResponse.json({ processed: totalProcessed, backfilled });
   } catch (err) {
     console.error("[cron] Unhandled error:", (err as Error).message);
     return NextResponse.json({ error: "Cron processing failed" }, { status: 500 });
