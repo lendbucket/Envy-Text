@@ -70,6 +70,38 @@ export async function fetchMessagePrice(
   return null;
 }
 
+const TWILIO_STATUS_MAP: Record<string, string> = {
+  queued: "queued",
+  sending: "sending",
+  sent: "sent",
+  delivered: "delivered",
+  undelivered: "failed",
+  failed: "failed",
+};
+
+export interface TwilioMessageStatus {
+  status: string;
+  errorCode: string | null;
+  errorMessage: string | null;
+  price: number | null;
+  segments: number | null;
+}
+
+export async function fetchMessageStatus(
+  sid: string
+): Promise<TwilioMessageStatus> {
+  const tw = getClient();
+  const msg = await tw.messages(sid).fetch();
+  const mapped = TWILIO_STATUS_MAP[msg.status] || msg.status;
+  return {
+    status: mapped,
+    errorCode: msg.errorCode != null ? String(msg.errorCode) : null,
+    errorMessage: msg.errorMessage || null,
+    price: msg.price ? Math.abs(parseFloat(msg.price)) : null,
+    segments: msg.numSegments ? parseInt(msg.numSegments, 10) : null,
+  };
+}
+
 export async function lookupNumber(
   phone: string
 ): Promise<{ lineType: string | null }> {

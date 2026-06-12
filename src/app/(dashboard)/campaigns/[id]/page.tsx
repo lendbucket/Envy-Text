@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Tag, AlertTriangle, Download, Users } from "lucide-react";
+import { ArrowLeft, Tag, AlertTriangle, Download, Users, RefreshCw } from "lucide-react";
 import { formatPhone } from "@/lib/phone";
 
 const ERROR_EXPLANATIONS: Record<string, string> = {
@@ -79,6 +79,10 @@ export default function CampaignDetailPage() {
   const [lookupResult, setLookupResult] = useState("");
   const [showLookupConfirm, setShowLookupConfirm] = useState(false);
   const [lookupEstimate, setLookupEstimate] = useState("");
+
+  // Reconcile state
+  const [reconciling, setReconciling] = useState(false);
+  const [reconcileResult, setReconcileResult] = useState("");
 
   // Audience builder state
   const [audienceGroups, setAudienceGroups] = useState<Set<string>>(new Set());
@@ -164,7 +168,7 @@ export default function CampaignDetailPage() {
         >
           <ArrowLeft className="w-5 h-5" />
         </Link>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h2 className="font-display text-xl sm:text-2xl font-semibold text-primary truncate">
             {campaign.name}
           </h2>
@@ -172,7 +176,44 @@ export default function CampaignDetailPage() {
             {campaign.status === "sending" ? "Sending now" : campaign.status} | {campaign.recipient_count} recipients
           </p>
         </div>
+        {/* Refresh from Twilio */}
+        {["sent", "sending"].includes(campaign.status) && (
+          <button
+            onClick={async () => {
+              setReconciling(true);
+              setReconcileResult("");
+              try {
+                const res = await fetch(`/api/campaigns/${campaign.id}/reconcile`, { method: "POST" });
+                const data = await res.json();
+                if (res.ok) {
+                  setReconcileResult(
+                    `Checked ${data.checked}, updated ${data.updated} (${data.delivered} delivered, ${data.failed} failed)`
+                  );
+                  fetchCampaign();
+                } else {
+                  setReconcileResult(data.error || "Reconciliation failed");
+                }
+              } catch {
+                setReconcileResult("Reconciliation failed");
+              } finally {
+                setReconciling(false);
+              }
+            }}
+            disabled={reconciling}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg text-secondary hover:text-primary transition-colors disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-accent/30 shrink-0"
+            title="Fetch real statuses from Twilio for any rows stuck as sent"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${reconciling ? "animate-spin" : ""}`} />
+            {reconciling ? "Syncing..." : "Refresh from Twilio"}
+          </button>
+        )}
       </div>
+
+      {reconcileResult && (
+        <div className="mb-6 p-3 bg-delivered/10 border border-delivered/20 rounded-xl text-sm text-delivered">
+          {reconcileResult}
+        </div>
+      )}
 
       {/* Analytics grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
