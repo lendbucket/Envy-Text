@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Send, Clock, FlaskConical } from "lucide-react";
-import { analyzeMessage, estimateCost } from "@/lib/sms/segments";
+import { ArrowLeft, Send, Clock, FlaskConical, ChevronDown, ChevronUp, Zap } from "lucide-react";
+import { analyzeMessage, estimateCost, findNonGsmChars, replaceSmartChars } from "@/lib/sms/segments";
 import { OPT_OUT_SUFFIX } from "@/lib/sms/compliance";
 import { ImageUpload } from "@/components/image-upload";
 
@@ -44,6 +44,7 @@ export default function CampaignComposePage() {
   const [error, setError] = useState("");
   const [testResult, setTestResult] = useState("");
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [showPriceBreakdown, setShowPriceBreakdown] = useState(false);
 
   const fetchTags = useCallback(() => {
     fetch("/api/contacts/tags")
@@ -95,6 +96,40 @@ export default function CampaignComposePage() {
     () => estimateCost(effectiveBody, hasMedia, recipientCount, pricing),
     [effectiveBody, hasMedia, recipientCount, pricing]
   );
+
+  // Non-GSM character detection for "Why this price" breakdown
+  const nonGsmChars = useMemo(
+    () => (segmentInfo.encoding === "UCS-2" ? findNonGsmChars(effectiveBody) : []),
+    [effectiveBody, segmentInfo.encoding]
+  );
+  const hasReplaceableChars = nonGsmChars.some((c) => c.replaceable);
+
+  // Cost if we were to clean smart chars
+  const cleanedBody = useMemo(
+    () => (hasReplaceableChars ? replaceSmartChars(effectiveBody) : effectiveBody),
+    [effectiveBody, hasReplaceableChars]
+  );
+  const cleanedSegmentInfo = useMemo(
+    () => (hasReplaceableChars ? analyzeMessage(cleanedBody, hasMedia) : segmentInfo),
+    [cleanedBody, hasMedia, hasReplaceableChars, segmentInfo]
+  );
+  const cleanedCost = useMemo(
+    () =>
+      hasReplaceableChars
+        ? estimateCost(cleanedBody, hasMedia, recipientCount, pricing)
+        : cost,
+    [cleanedBody, hasMedia, recipientCount, pricing, hasReplaceableChars, cost]
+  );
+
+  // Check if long text-only SMS would be cheaper as MMS
+  const mmsCostPerRecipient = pricing.mms_price + pricing.carrier_fee_per_mms;
+  const showMmsHint = !hasMedia && segmentInfo.segmentCount > 1 &&
+    cost.costPerRecipient > mmsCostPerRecipient;
+
+  function handleReplaceSmartChars() {
+    const cleaned = replaceSmartChars(body);
+    setBody(cleaned);
+  }
 
   // Sample preview with merge fields
   const previewBody = useMemo(() => {
@@ -427,6 +462,118 @@ export default function CampaignComposePage() {
                 ? `${recipientCount.toLocaleString()} recipients x $${cost.costPerRecipient.toFixed(4)} MMS = $${cost.totalCost.toFixed(2)} estimated`
                 : `${recipientCount.toLocaleString()} recipients x ${segmentInfo.segmentCount} segment${segmentInfo.segmentCount !== 1 ? "s" : ""} x $${cost.costPerRecipient.toFixed(4)} = $${cost.totalCost.toFixed(2)} estimated`}
             </p>
+
+            {/* Why this price toggle */}
+            {effectiveBody.length > 0 && (
+              <button
+                onClick={() => setShowPriceBreakdown(!showPriceBreakdown)}
+                className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover mt-2 transition-colors focus:outline-none"
+              >
+                {showPriceBreakdown ? "Hide breakdown" : "Why this price"}
+                {showPriceBreakdown ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              </button>
+            )}
+
+            {showPriceBreakdown && effectiveBody.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-border space-y-3 text-xs">
+                {hasMedia ? (
+                  <div className="text-secondary">
+                    <p>MMS is a flat rate per message regardless of body length.</p>
+                    <p className="tabular-nums mt-1">
+                      Message fee: ${pricing.mms_price.toFixed(4)} + carrier fee: ${pricing.carrier_fee_per_mms.toFixed(4)} = ${mmsCostPerRecipient.toFixed(4)} per recipient
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Character and segment details */}
+                    <div className="text-secondary space-y-1">
+                      <p>
+                        {segmentInfo.charCount} characters, {segmentInfo.encoding} encoding, {segmentInfo.segmentCount} segment{segmentInfo.segmentCount !== 1 ? "s" : ""}
+                      </p>
+                      {segmentInfo.encoding === "GSM-7" ? (
+                        <p>
+                          GSM-7: {segmentInfo.charCount <= 160 ? "up to 160 chars per single segment" : "153 chars per segment in multipart"}
+                        </p>
+                      ) : (
+                        <p>
+                          UCS-2 (Unicode): {segmentInfo.charCount <= 70 ? "up to 70 chars per single segment" : "67 chars per segment in multipart"}
+                        </p>
+                      )}
+                      <p className="tabular-nums">
+                        Per recipient: {segmentInfo.segmentCount} x (${pricing.sms_price_per_segment.toFixed(4)} + ${pricing.carrier_fee_per_sms.toFixed(4)}) = ${cost.costPerRecipient.toFixed(4)}
+                      </p>
+                    </div>
+
+                    {/* Non-GSM characters */}
+                    {segmentInfo.encoding === "UCS-2" && nonGsmChars.length > 0 && (
+                      <div className="bg-scheduled/10 border border-scheduled/20 rounded-lg p-3">
+                        <p className="text-primary font-medium mb-1.5">
+                          Unicode characters detected ({nonGsmChars.length})
+                        </p>
+                        <p className="text-secondary mb-2">
+                          These characters force UCS-2 encoding, which halves the characters per segment and increases cost.
+                        </p>
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                          {nonGsmChars.slice(0, 20).map((c, i) => (
+                            <span
+                              key={i}
+                              className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-mono ${
+                                c.replaceable
+                                  ? "bg-scheduled/20 text-scheduled"
+                                  : "bg-failed/10 text-failed"
+                              }`}
+                              title={c.name}
+                            >
+                              &ldquo;{c.char}&rdquo; {c.name}
+                            </span>
+                          ))}
+                          {nonGsmChars.length > 20 && (
+                            <span className="text-secondary">and {nonGsmChars.length - 20} more</span>
+                          )}
+                        </div>
+
+                        {hasReplaceableChars && (
+                          <div className="border-t border-scheduled/20 pt-2 mt-2">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="text-secondary">
+                                After replacement: {cleanedSegmentInfo.encoding}, {cleanedSegmentInfo.segmentCount} segment{cleanedSegmentInfo.segmentCount !== 1 ? "s" : ""}
+                              </span>
+                              {cleanedCost.totalCost < cost.totalCost && (
+                                <span className="text-delivered font-medium tabular-nums">
+                                  Save ${(cost.totalCost - cleanedCost.totalCost).toFixed(2)}
+                                </span>
+                              )}
+                            </div>
+                            <button
+                              onClick={handleReplaceSmartChars}
+                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors focus:outline-none focus:ring-2 focus:ring-accent/30"
+                            >
+                              <Zap className="w-3 h-3" />
+                              Replace with SMS-safe characters
+                            </button>
+                            {nonGsmChars.some((c) => !c.replaceable) && (
+                              <p className="text-failed mt-1.5">
+                                {nonGsmChars.filter((c) => !c.replaceable).length} character{nonGsmChars.filter((c) => !c.replaceable).length !== 1 ? "s have" : " has"} no substitute and must be removed manually.
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* MMS hint for long text-only messages */}
+                    {showMmsHint && (
+                      <div className="bg-accent-tint border border-accent/20 rounded-lg p-3">
+                        <p className="text-primary font-medium mb-1">Tip: MMS would be cheaper</p>
+                        <p className="text-secondary tabular-nums">
+                          SMS: ${cost.costPerRecipient.toFixed(4)}/recipient ({segmentInfo.segmentCount} segments) vs MMS: ${mmsCostPerRecipient.toFixed(4)}/recipient (flat rate). Attach an image to send as MMS and save ${((cost.costPerRecipient - mmsCostPerRecipient) * recipientCount).toFixed(2)} total.
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Test send */}

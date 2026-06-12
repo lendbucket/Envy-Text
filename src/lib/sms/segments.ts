@@ -79,6 +79,77 @@ export function analyzeMessage(body: string, hasMedia: boolean): SegmentInfo {
   };
 }
 
+// Characters that commonly sneak in from word processors and can be replaced
+// with GSM-7 equivalents to avoid UCS-2 encoding.
+const SMART_REPLACEMENTS: [RegExp, string, string][] = [
+  [/\u2018/g, "'", "left single quote"],     // '
+  [/\u2019/g, "'", "right single quote"],    // '
+  [/\u201C/g, '"', "left double quote"],     // "
+  [/\u201D/g, '"', "right double quote"],    // "
+  [/\u2014/g, "-", "em dash"],              // —
+  [/\u2013/g, "-", "en dash"],              // –
+  [/\u2026/g, "...", "ellipsis"],           // …
+];
+
+// Characters that force UCS-2 but have no safe GSM-7 substitute.
+const NO_SUBSTITUTE = new Set([
+  "\u00AE", // ®  registered sign
+  "\u2122", // ™  trademark sign
+  "\u00A9", // ©  copyright sign
+]);
+
+export interface NonGsmChar {
+  char: string;
+  index: number;
+  name: string;
+  replaceable: boolean;
+}
+
+/**
+ * Find all non-GSM-7 characters in the body with their positions.
+ */
+export function findNonGsmChars(body: string): NonGsmChar[] {
+  const result: NonGsmChar[] = [];
+  let i = 0;
+  for (const char of body) {
+    if (!GSM7_BASIC.includes(char) && !GSM7_EXTENDED.includes(char)) {
+      let name = "Unicode character";
+      let replaceable = false;
+
+      for (const [pattern, , label] of SMART_REPLACEMENTS) {
+        if (pattern.test(char)) {
+          name = label;
+          replaceable = true;
+          break;
+        }
+      }
+
+      if (NO_SUBSTITUTE.has(char)) {
+        if (char === "\u00AE") name = "registered sign";
+        else if (char === "\u2122") name = "trademark sign";
+        else if (char === "\u00A9") name = "copyright sign";
+        replaceable = false;
+      }
+
+      result.push({ char, index: i, name, replaceable });
+    }
+    i++;
+  }
+  return result;
+}
+
+/**
+ * Replace common smart/typographic characters with GSM-7 equivalents.
+ * Returns the cleaned body. Characters without a substitute are left in place.
+ */
+export function replaceSmartChars(body: string): string {
+  let result = body;
+  for (const [pattern, replacement] of SMART_REPLACEMENTS) {
+    result = result.replace(pattern, replacement);
+  }
+  return result;
+}
+
 export interface CostEstimate {
   segmentInfo: SegmentInfo;
   costPerRecipient: number;
