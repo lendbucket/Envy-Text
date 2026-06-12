@@ -239,6 +239,56 @@ export async function GET(
         }));
     }
 
+    // Audience group counts for "Create audience" feature
+    // clicked_contact_ids: contacts with at least one click
+    const clickedContactIds = new Set<string>();
+    if (trackedLinks && trackedLinks.length > 0) {
+      const linkIds = trackedLinks.map((l) => l.id);
+      const { data: codesForAudience } = await supabase
+        .from("tracked_link_codes")
+        .select("id, contact_id")
+        .in("tracked_link_id", linkIds);
+      if (codesForAudience && codesForAudience.length > 0) {
+        const codeIds = codesForAudience.map((c) => c.id);
+        const { data: clicksForAudience } = await supabase
+          .from("link_clicks")
+          .select("tracked_link_code_id")
+          .in("tracked_link_code_id", codeIds);
+        if (clicksForAudience) {
+          const clickedCodes = new Set(clicksForAudience.map((c) => c.tracked_link_code_id));
+          for (const code of codesForAudience) {
+            if (clickedCodes.has(code.id)) clickedContactIds.add(code.contact_id);
+          }
+        }
+      }
+    }
+
+    // replied_contact_ids: contacts who replied
+    const repliedContactIds = new Set<string>();
+    {
+      const { data: repliedRows } = await supabase
+        .from("campaign_recipients")
+        .select("contact_id")
+        .eq("campaign_id", id)
+        .not("replied_at", "is", null)
+        .limit(1000);
+      for (const r of repliedRows || []) repliedContactIds.add(r.contact_id);
+    }
+
+    // engaged = clicked OR replied (deduplicated)
+    const engagedContactIds = new Set([...clickedContactIds, ...repliedContactIds]);
+
+    // delivered but not engaged
+    const deliveredCount2 = counts.delivered + counts.sent; // sent+delivered = successfully sent
+    const noResponseCount = Math.max(0, deliveredCount2 - engagedContactIds.size);
+
+    const audienceGroups = {
+      clicked: clickedContactIds.size,
+      replied: repliedContactIds.size,
+      engaged: engagedContactIds.size,
+      no_response: noResponseCount,
+    };
+
     return NextResponse.json({
       ...data,
       recipient_stats: counts,
@@ -251,6 +301,7 @@ export async function GET(
       click_timeline: clickTimeline,
       replies,
       opt_outs: optOuts,
+      audience_groups: audienceGroups,
       failed_recipients: (failedRecipients || []).map((r) => ({
         id: r.id,
         contact_id: r.contact_id,

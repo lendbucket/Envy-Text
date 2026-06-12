@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Tag, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Tag, AlertTriangle, Download, Users } from "lucide-react";
 import { formatPhone } from "@/lib/phone";
 
 const ERROR_EXPLANATIONS: Record<string, string> = {
@@ -65,6 +65,7 @@ interface Campaign {
   click_timeline: { clicked_at: string; contact_name: string; url: string }[];
   replies: { contact_id: string; replied_at: string; contact: { phone: string; first_name: string | null; last_name: string | null } | null }[];
   opt_outs: { contact_id: string; contact: { phone: string; first_name: string | null; last_name: string | null } | null }[];
+  audience_groups: { clicked: number; replied: number; engaged: number; no_response: number };
   failed_recipients: FailedRecipient[];
 }
 
@@ -78,6 +79,12 @@ export default function CampaignDetailPage() {
   const [lookupResult, setLookupResult] = useState("");
   const [showLookupConfirm, setShowLookupConfirm] = useState(false);
   const [lookupEstimate, setLookupEstimate] = useState("");
+
+  // Audience builder state
+  const [audienceGroups, setAudienceGroups] = useState<Set<string>>(new Set());
+  const [audienceTag, setAudienceTag] = useState("");
+  const [audienceLoading, setAudienceLoading] = useState(false);
+  const [audienceResult, setAudienceResult] = useState("");
 
   function fetchCampaign() {
     if (!params.id) return;
@@ -509,6 +516,21 @@ export default function CampaignDetailPage() {
         </div>
       )}
 
+      {/* Create audience */}
+      {campaign.audience_groups && (campaign.status === "sent" || campaign.status === "sending") && (
+        <CreateAudienceSection
+          campaign={campaign}
+          audienceGroups={audienceGroups}
+          setAudienceGroups={setAudienceGroups}
+          audienceTag={audienceTag}
+          setAudienceTag={setAudienceTag}
+          audienceLoading={audienceLoading}
+          setAudienceLoading={setAudienceLoading}
+          audienceResult={audienceResult}
+          setAudienceResult={setAudienceResult}
+        />
+      )}
+
       {/* Message preview */}
       <div className="bg-panel rounded-xl border border-border p-6 mb-6">
         <h3 className="text-sm font-semibold text-primary uppercase tracking-wide mb-3">
@@ -552,6 +574,220 @@ export default function CampaignDetailPage() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+const AUDIENCE_GROUP_LABELS: Record<string, string> = {
+  clicked: "Clicked",
+  replied: "Replied",
+  engaged: "Engaged (clicked or replied)",
+  no_response: "No response",
+};
+
+function CreateAudienceSection({
+  campaign,
+  audienceGroups,
+  setAudienceGroups,
+  audienceTag,
+  setAudienceTag,
+  audienceLoading,
+  setAudienceLoading,
+  audienceResult,
+  setAudienceResult,
+}: {
+  campaign: Campaign;
+  audienceGroups: Set<string>;
+  setAudienceGroups: (s: Set<string>) => void;
+  audienceTag: string;
+  setAudienceTag: (s: string) => void;
+  audienceLoading: boolean;
+  setAudienceLoading: (b: boolean) => void;
+  audienceResult: string;
+  setAudienceResult: (s: string) => void;
+}) {
+  const groups = campaign.audience_groups;
+  const groupKeys = ["clicked", "replied", "engaged", "no_response"] as const;
+
+  function toggleGroup(key: string) {
+    const next = new Set(audienceGroups);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    setAudienceGroups(next);
+  }
+
+  // Compute total contacts for selected groups (deduplicated via engaged logic)
+  function selectedCount(): number {
+    const selected = Array.from(audienceGroups);
+    if (selected.length === 0) return 0;
+    // If "engaged" is selected, it includes clicked+replied deduplicated
+    // If both "clicked" and "replied" are selected without "engaged", still deduplicate
+    let total = 0;
+    const hasEngaged = selected.includes("engaged");
+    const hasClicked = selected.includes("clicked");
+    const hasReplied = selected.includes("replied");
+    const hasNoResponse = selected.includes("no_response");
+
+    if (hasEngaged || (hasClicked && hasReplied)) {
+      total += groups.engaged;
+    } else if (hasClicked) {
+      total += groups.clicked;
+    } else if (hasReplied) {
+      total += groups.replied;
+    }
+
+    if (hasNoResponse) {
+      total += groups.no_response;
+    }
+
+    return total;
+  }
+
+  const slug = campaign.name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+
+  const defaultTag = audienceGroups.size === 1
+    ? `${slug}-${Array.from(audienceGroups)[0].replace("_", "-")}s`
+    : `${slug}-audience`;
+
+  const effectiveTag = audienceTag || defaultTag;
+  const count = selectedCount();
+
+  async function handleTag() {
+    if (count === 0 || !effectiveTag) return;
+    setAudienceLoading(true);
+    setAudienceResult("");
+    try {
+      const res = await fetch(`/api/campaigns/${campaign.id}/audience`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          groups: Array.from(audienceGroups),
+          tag: effectiveTag,
+          action: "tag",
+        }),
+      });
+      const data = await res.json();
+      setAudienceResult(data.message || "Tagging complete.");
+    } catch {
+      setAudienceResult("Tagging failed.");
+    } finally {
+      setAudienceLoading(false);
+    }
+  }
+
+  async function handleExport() {
+    if (count === 0) return;
+    setAudienceLoading(true);
+    try {
+      const res = await fetch(`/api/campaigns/${campaign.id}/audience`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          groups: Array.from(audienceGroups),
+          tag: effectiveTag,
+          action: "export",
+        }),
+      });
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${effectiveTag}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setAudienceResult("Export failed.");
+    } finally {
+      setAudienceLoading(false);
+    }
+  }
+
+  return (
+    <div className="bg-panel rounded-xl border border-border p-6 mb-6">
+      <h3 className="text-sm font-semibold text-primary uppercase tracking-wide mb-4 flex items-center gap-2">
+        <Users className="w-4 h-4" />
+        Create audience from results
+      </h3>
+
+      {/* Group checkboxes */}
+      <div className="grid grid-cols-2 gap-2 mb-4">
+        {groupKeys.map((key) => {
+          const groupCount = groups[key];
+          return (
+            <label
+              key={key}
+              className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors ${
+                audienceGroups.has(key)
+                  ? "border-accent bg-accent-tint"
+                  : "border-border hover:border-accent/30"
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={audienceGroups.has(key)}
+                onChange={() => toggleGroup(key)}
+                className="w-4 h-4 rounded border-border text-accent focus:ring-accent/30"
+              />
+              <span className="text-sm text-primary">
+                {AUDIENCE_GROUP_LABELS[key]}
+              </span>
+              <span className="text-xs text-secondary tabular-nums ml-auto">
+                {groupCount.toLocaleString()}
+              </span>
+            </label>
+          );
+        })}
+      </div>
+
+      {/* Tag input */}
+      {audienceGroups.size > 0 && (
+        <div className="space-y-3">
+          <div>
+            <label htmlFor="audience-tag" className="block text-sm font-medium text-primary mb-1">
+              Tag name
+            </label>
+            <input
+              id="audience-tag"
+              type="text"
+              value={audienceTag}
+              onChange={(e) => setAudienceTag(e.target.value)}
+              placeholder={defaultTag}
+              className="w-full px-3 py-2 border border-border rounded-lg bg-panel text-primary text-sm placeholder:text-secondary/50 focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
+            />
+          </div>
+
+          <p className="text-xs text-secondary tabular-nums">
+            {count.toLocaleString()} contact{count !== 1 ? "s" : ""} will be tagged &quot;{effectiveTag}&quot;
+          </p>
+
+          {audienceResult && (
+            <p className="text-xs text-delivered">{audienceResult}</p>
+          )}
+
+          <div className="flex gap-2">
+            <button
+              onClick={handleTag}
+              disabled={audienceLoading || count === 0}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-accent/30 focus:ring-offset-2"
+            >
+              <Tag className="w-3.5 h-3.5" />
+              {audienceLoading ? "Applying..." : "Apply tag"}
+            </button>
+            <button
+              onClick={handleExport}
+              disabled={audienceLoading || count === 0}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium border border-border rounded-lg text-secondary hover:text-primary transition-colors disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-accent/30"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Export group as CSV
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
