@@ -134,14 +134,14 @@ Campaign detail page shows, with counts and percentages: sent, delivered, failed
 
 ## 11. Design System
 
-Salon Envy property on a Salon Envy subdomain: warm, polished, salon-grade, executed as a focused SaaS workspace. Think Linear's discipline wearing Salon Envy's palette.
+Clean, professional workspace. Blue and grey on Inter. No warm tones.
 
-- Background: warm off-white #FAF7F2 canvas, pure white #FFFFFF cards and panels. Borders #E8E2D8, 1px, never heavier.
-- Text: espresso #1C1410 primary, #6F6258 secondary.
-- Accent: one accent for primary buttons, outbound bubbles, active states, unread badge. Deep rose #B0445C as a single Tailwind token named accent so it can be swapped in one line to match the Salon Envy portal.
-- Status: delivered #2E7D52, failed #C03434, scheduled #9A6B15. Muted, never neon.
-- Type: Inter for all UI. Fraunces only for the "Envy Texts" wordmark in the sidebar and large page titles. Tabular figures for counts and costs.
-- Layout: fixed slim sidebar (Conversations, Contacts, Campaigns, Settings) with icon and label, content max-width constrained, 8px spacing grid, rounded-xl cards, shadow-sm only. No gradients, no glassmorphism.
+- Background: light grey #F7F8FA canvas, pure white #FFFFFF cards and panels. Borders #E4E7EC, 1px, never heavier.
+- Text: near-black #111827 primary, #6B7280 secondary.
+- Accent: blue #2563EB for primary buttons, outbound bubbles, active nav, links, unread badge. Hover shade #1D4ED8. Light tint #EFF4FF for selected states. Single Tailwind token named accent.
+- Status: delivered #16A34A, failed #DC2626, scheduled #D97706. Muted, never neon.
+- Type: Inter everywhere including the wordmark. No serif fonts. Tabular figures for counts and costs.
+- Layout: fixed slim sidebar (Dashboard, Conversations, Contacts, Campaigns, Settings) with icon and label, content max-width constrained, 8px spacing grid, rounded-xl cards, shadow-sm only. No gradients, no glassmorphism.
 - Signature element: the live cost meter on campaign compose. Large tabular-numeral dollar figure updating as the operator types, segment math written out beneath in plain language. The most important number in the app, designed like it.
 - Microcopy: plain, active, confident. "Send to 412 contacts," not "Submit." Empty states say what to do next. Errors say what failed and how to fix it. No exclamation points, no emoji, no em dashes anywhere.
 - Keyboard-friendly: visible focus rings, Enter-to-send, / focuses search. Responsive enough to triage the inbox from a phone.

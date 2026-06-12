@@ -48,7 +48,7 @@ export function Sidebar() {
                   onClick={() => setMobileOpen(false)}
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                     active
-                      ? "bg-accent/10 text-accent"
+                      ? "bg-accent-tint text-accent"
                       : "text-secondary hover:text-primary hover:bg-canvas"
                   }`}
                 >

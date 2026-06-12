@@ -464,7 +464,7 @@ export default function CampaignComposePage() {
                 onClick={() => setScheduleMode("now")}
                 className={`flex-1 py-2 text-sm font-medium rounded-lg border transition-colors focus:outline-none focus:ring-2 focus:ring-accent/30 ${
                   scheduleMode === "now"
-                    ? "bg-accent/10 text-accent border-accent/30"
+                    ? "bg-accent-tint text-accent border-accent/30"
                     : "border-border text-secondary"
                 }`}
               >
@@ -474,7 +474,7 @@ export default function CampaignComposePage() {
                 onClick={() => setScheduleMode("schedule")}
                 className={`flex-1 py-2 text-sm font-medium rounded-lg border transition-colors focus:outline-none focus:ring-2 focus:ring-accent/30 ${
                   scheduleMode === "schedule"
-                    ? "bg-accent/10 text-accent border-accent/30"
+                    ? "bg-accent-tint text-accent border-accent/30"
                     : "border-border text-secondary"
                 }`}
               >

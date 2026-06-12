@@ -9,22 +9,23 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        canvas: "#FAF7F2",
+        canvas: "#F7F8FA",
         panel: "#FFFFFF",
-        border: "#E8E2D8",
-        primary: "#1C1410",
-        secondary: "#6F6258",
+        border: "#E4E7EC",
+        primary: "#111827",
+        secondary: "#6B7280",
         accent: {
-          DEFAULT: "#B0445C",
-          hover: "#9C3B50",
+          DEFAULT: "#2563EB",
+          hover: "#1D4ED8",
+          tint: "#EFF4FF",
         },
-        delivered: "#2E7D52",
-        failed: "#C03434",
-        scheduled: "#9A6B15",
+        delivered: "#16A34A",
+        failed: "#DC2626",
+        scheduled: "#D97706",
       },
       fontFamily: {
         sans: ["var(--font-inter)", "system-ui", "sans-serif"],
-        display: ["var(--font-fraunces)", "serif"],
+        display: ["var(--font-inter)", "system-ui", "sans-serif"],
       },
       borderRadius: {
         xl: "0.75rem",
