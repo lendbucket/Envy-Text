@@ -10,6 +10,10 @@ import {
   Trash2,
   ChevronUp,
   ChevronDown,
+  ChevronsLeft,
+  ChevronsRight,
+  ChevronLeft,
+  ChevronRight,
   X,
   Phone,
 } from "lucide-react";
@@ -18,10 +22,24 @@ import { ContactEditPanel, type Contact } from "@/components/contact-edit-panel"
 
 type SortField = "first_name" | "phone" | "created_at";
 
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200, 500, 1000] as const;
+const STORAGE_KEY = "envy-contacts-page-size";
+
+function getSavedPageSize(): number {
+  if (typeof window === "undefined") return 50;
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) {
+    const n = parseInt(saved, 10);
+    if ((PAGE_SIZE_OPTIONS as readonly number[]).includes(n)) return n;
+  }
+  return 50;
+}
+
 export default function ContactsPage() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(getSavedPageSize);
   const [search, setSearch] = useState("");
   const [sortField, setSortField] = useState<SortField>("created_at");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
@@ -54,13 +72,17 @@ export default function ContactsPage() {
   const [addError, setAddError] = useState("");
   const [addLoading, setAddLoading] = useState(false);
 
-  const limit = 50;
+  function handlePageSizeChange(newSize: number) {
+    setPageSize(newSize);
+    setPage(1);
+    localStorage.setItem(STORAGE_KEY, String(newSize));
+  }
 
   const fetchContacts = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams({
       page: page.toString(),
-      limit: limit.toString(),
+      limit: pageSize.toString(),
       sort: sortField,
       order: sortOrder,
     });
@@ -77,7 +99,7 @@ export default function ContactsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, sortField, sortOrder, activeTags]);
+  }, [page, pageSize, search, sortField, sortOrder, activeTags]);
 
   const fetchTags = useCallback(async () => {
     try {
@@ -234,7 +256,9 @@ export default function ContactsPage() {
     );
   }
 
-  const totalPages = Math.ceil(total / limit);
+  const totalPages = Math.ceil(total / pageSize);
+  const rangeStart = total > 0 ? (page - 1) * pageSize + 1 : 0;
+  const rangeEnd = Math.min(page * pageSize, total);
 
   return (
     <div className="px-6 py-8 max-w-6xl mx-auto">
@@ -476,29 +500,75 @@ export default function ContactsPage() {
       </div>
 
       {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between mt-4">
-          <p className="text-sm text-secondary">
-            Page {page} of {totalPages}
-          </p>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPage(Math.max(1, page - 1))}
-              disabled={page === 1}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-secondary hover:text-primary disabled:opacity-50 transition-colors focus:outline-none focus:ring-2 focus:ring-accent/30"
+      <div className="flex items-center justify-between mt-4 flex-wrap gap-3">
+        <p className="text-sm text-secondary tabular-nums">
+          {total > 0
+            ? `Showing ${rangeStart.toLocaleString()}-${rangeEnd.toLocaleString()} of ${total.toLocaleString()}`
+            : "No contacts"}
+        </p>
+
+        <div className="flex items-center gap-3">
+          {/* Page size selector */}
+          <div className="flex items-center gap-1.5">
+            <label htmlFor="page-size" className="text-xs text-secondary">
+              Per page
+            </label>
+            <select
+              id="page-size"
+              value={pageSize}
+              onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+              className="px-2 py-1 text-xs border border-border rounded-lg bg-panel text-primary tabular-nums focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
             >
-              Previous
-            </button>
-            <button
-              onClick={() => setPage(Math.min(totalPages, page + 1))}
-              disabled={page === totalPages}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg text-secondary hover:text-primary disabled:opacity-50 transition-colors focus:outline-none focus:ring-2 focus:ring-accent/30"
-            >
-              Next
-            </button>
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
           </div>
+
+          {/* Navigation buttons */}
+          {totalPages > 1 && (
+            <div className="flex gap-1">
+              <button
+                onClick={() => setPage(1)}
+                disabled={page === 1}
+                className="p-1.5 border border-border rounded-lg text-secondary hover:text-primary disabled:opacity-50 transition-colors focus:outline-none focus:ring-2 focus:ring-accent/30"
+                title="First page"
+              >
+                <ChevronsLeft className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setPage(Math.max(1, page - 1))}
+                disabled={page === 1}
+                className="p-1.5 border border-border rounded-lg text-secondary hover:text-primary disabled:opacity-50 transition-colors focus:outline-none focus:ring-2 focus:ring-accent/30"
+                title="Previous page"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="flex items-center px-2 text-xs text-secondary tabular-nums">
+                {page} / {totalPages}
+              </span>
+              <button
+                onClick={() => setPage(Math.min(totalPages, page + 1))}
+                disabled={page === totalPages}
+                className="p-1.5 border border-border rounded-lg text-secondary hover:text-primary disabled:opacity-50 transition-colors focus:outline-none focus:ring-2 focus:ring-accent/30"
+                title="Next page"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setPage(totalPages)}
+                disabled={page === totalPages}
+                className="p-1.5 border border-border rounded-lg text-secondary hover:text-primary disabled:opacity-50 transition-colors focus:outline-none focus:ring-2 focus:ring-accent/30"
+                title="Last page"
+              >
+                <ChevronsRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
       {/* Edit side panel */}
       {editContact && (
