@@ -19,16 +19,21 @@ export async function GET(
       return NextResponse.json({ error: "Campaign not found" }, { status: 404 });
     }
 
-    // Recipient status counts
-    const { data: recipients } = await supabase
-      .from("campaign_recipients")
-      .select("status")
-      .eq("campaign_id", id);
+    // Recipient status counts using server-side count queries
+    const statusKeys = ["pending", "sent", "delivered", "failed", "skipped_opted_out"] as const;
+    const countResults = await Promise.all(
+      statusKeys.map((s) =>
+        supabase
+          .from("campaign_recipients")
+          .select("id", { count: "exact", head: true })
+          .eq("campaign_id", id)
+          .eq("status", s)
+      )
+    );
 
-    const counts = { pending: 0, sent: 0, delivered: 0, failed: 0, skipped_opted_out: 0 };
-    for (const row of recipients || []) {
-      const s = row.status as keyof typeof counts;
-      if (s in counts) counts[s]++;
+    const counts: Record<string, number> = {};
+    for (let i = 0; i < statusKeys.length; i++) {
+      counts[statusKeys[i]] = countResults[i].count || 0;
     }
 
     // Replied count (replied_at is not null)

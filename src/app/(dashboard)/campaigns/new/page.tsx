@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Send, Clock, FlaskConical } from "lucide-react";
 import { analyzeMessage, estimateCost } from "@/lib/sms/segments";
 import { OPT_OUT_SUFFIX } from "@/lib/sms/compliance";
+import { ImageUpload } from "@/components/image-upload";
 
 interface Pricing {
   sms_price_per_segment: number;
@@ -37,6 +38,7 @@ export default function CampaignComposePage() {
   const [testSending, setTestSending] = useState(false);
   const [error, setError] = useState("");
   const [testResult, setTestResult] = useState("");
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
 
   // Fetch tags and pricing on mount
   useEffect(() => {
@@ -44,21 +46,17 @@ export default function CampaignComposePage() {
     fetch("/api/pricing").then((r) => r.json()).then(setPricing).catch(() => {});
   }, []);
 
-  // Fetch recipient count when audience changes
+  // Fetch recipient count when audience changes using server-side counts
   useEffect(() => {
-    const params = new URLSearchParams({ limit: "0" });
+    const params = new URLSearchParams();
     if (audienceType === "tags" && selectedTags.length > 0) {
       params.set("tags", selectedTags.join(","));
     }
-    // Fetch total and opted-out counts
-    fetch(`/api/contacts?${params}&limit=50000`)
+    fetch(`/api/contacts/count?${params}`)
       .then((r) => r.json())
       .then((data) => {
-        const contacts = data.contacts || [];
-        const active = contacts.filter((c: { opted_out: boolean }) => !c.opted_out);
-        const optedOut = contacts.filter((c: { opted_out: boolean }) => c.opted_out);
-        setRecipientCount(active.length);
-        setOptedOutCount(optedOut.length);
+        setRecipientCount(data.active || 0);
+        setOptedOutCount(data.opted_out || 0);
       })
       .catch(() => {});
   }, [audienceType, selectedTags]);
@@ -70,10 +68,11 @@ export default function CampaignComposePage() {
   }, [body, appendOptOut]);
 
   // Segment and cost analysis on the effective body
-  const segmentInfo = useMemo(() => analyzeMessage(effectiveBody, false), [effectiveBody]);
+  const hasMedia = !!mediaUrl;
+  const segmentInfo = useMemo(() => analyzeMessage(effectiveBody, hasMedia), [effectiveBody, hasMedia]);
   const cost = useMemo(
-    () => estimateCost(effectiveBody, false, recipientCount, pricing),
-    [effectiveBody, recipientCount, pricing]
+    () => estimateCost(effectiveBody, hasMedia, recipientCount, pricing),
+    [effectiveBody, hasMedia, recipientCount, pricing]
   );
 
   // Sample preview with merge fields
@@ -112,7 +111,7 @@ export default function CampaignComposePage() {
     setError("");
 
     if (!name.trim()) { setError("Campaign name is required."); return; }
-    if (!body.trim()) { setError("Message body is required."); return; }
+    if (!body.trim() && !mediaUrl) { setError("Message body or an image is required."); return; }
     if (audienceType === "tags" && selectedTags.length === 0) {
       setError("Select at least one tag for the audience.");
       return;
@@ -152,6 +151,7 @@ export default function CampaignComposePage() {
         body: JSON.stringify({
           name: name.trim(),
           body: body.trim(),
+          media_urls: mediaUrl ? [mediaUrl] : [],
           audience_type: audienceType,
           audience_tags: audienceType === "tags" ? selectedTags : [],
           scheduled_at: scheduledAt,
@@ -258,13 +258,30 @@ export default function CampaignComposePage() {
                 <div className="flex items-center justify-between mt-1">
                   <div className="flex items-center gap-3 text-xs text-secondary tabular-nums">
                     <span>{segmentInfo.charCount} chars</span>
-                    <span>{segmentInfo.encoding}</span>
-                    <span>{segmentInfo.segmentCount} segment{segmentInfo.segmentCount !== 1 ? "s" : ""}</span>
+                    <span>{hasMedia ? "MMS" : segmentInfo.encoding}</span>
+                    <span>
+                      {hasMedia
+                        ? "1 message"
+                        : `${segmentInfo.segmentCount} segment${segmentInfo.segmentCount !== 1 ? "s" : ""}`}
+                    </span>
                   </div>
                 </div>
                 <p className="text-xs text-secondary mt-1">
                   Use {"{{first_name}}"} and {"{{last_name}}"} for merge fields. Any URLs will be shortened for click tracking.
                 </p>
+              </div>
+
+              {/* Image attach */}
+              <div className="pt-1">
+                {mediaUrl ? (
+                  <ImageUpload
+                    currentUrl={mediaUrl}
+                    onUploaded={setMediaUrl}
+                    onRemove={() => setMediaUrl(null)}
+                  />
+                ) : (
+                  <ImageUpload onUploaded={setMediaUrl} />
+                )}
               </div>
 
               {/* Opt-out toggle */}
@@ -363,6 +380,13 @@ export default function CampaignComposePage() {
 
             <div className="bg-canvas rounded-xl border border-border p-4 max-w-[280px] mx-auto">
               <div className="bg-accent rounded-xl px-3.5 py-2 text-white text-sm whitespace-pre-wrap break-words">
+                {mediaUrl && (
+                  <img
+                    src={mediaUrl}
+                    alt="Campaign media"
+                    className="w-full rounded-lg mb-1.5"
+                  />
+                )}
                 {previewBody || "Start typing your message..."}
               </div>
             </div>
@@ -378,7 +402,9 @@ export default function CampaignComposePage() {
               ${cost.totalCost.toFixed(2)}
             </p>
             <p className="text-xs text-secondary mt-1 tabular-nums">
-              {recipientCount.toLocaleString()} recipients x {segmentInfo.segmentCount} segment{segmentInfo.segmentCount !== 1 ? "s" : ""} x ${cost.costPerRecipient.toFixed(4)} = ${cost.totalCost.toFixed(2)} estimated
+              {hasMedia
+                ? `${recipientCount.toLocaleString()} recipients x $${cost.costPerRecipient.toFixed(4)} MMS = $${cost.totalCost.toFixed(2)} estimated`
+                : `${recipientCount.toLocaleString()} recipients x ${segmentInfo.segmentCount} segment${segmentInfo.segmentCount !== 1 ? "s" : ""} x $${cost.costPerRecipient.toFixed(4)} = $${cost.totalCost.toFixed(2)} estimated`}
             </p>
           </div>
 
@@ -395,6 +421,7 @@ export default function CampaignComposePage() {
                   body: JSON.stringify({
                     name: name.trim() || "Test draft",
                     body: body.trim(),
+                    media_urls: mediaUrl ? [mediaUrl] : [],
                     audience_type: audienceType,
                     audience_tags: audienceType === "tags" ? selectedTags : [],
                     append_opt_out: appendOptOut,
@@ -409,7 +436,7 @@ export default function CampaignComposePage() {
                 setTestSending(false);
               }
             }}
-            disabled={!body.trim() || testSending}
+            disabled={(!body.trim() && !mediaUrl) || testSending}
             className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium border border-border rounded-lg text-secondary hover:text-primary hover:border-primary/20 transition-colors disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-accent/30"
           >
             <FlaskConical className="w-4 h-4" />
@@ -477,7 +504,7 @@ export default function CampaignComposePage() {
 
             <button
               onClick={() => handleSubmit(scheduleMode === "schedule" ? "schedule" : "send")}
-              disabled={saving || !approved || !body.trim() || !name.trim() || recipientCount === 0}
+              disabled={saving || !approved || (!body.trim() && !mediaUrl) || !name.trim() || recipientCount === 0}
               className="w-full flex items-center justify-center gap-2 py-3 text-sm font-medium bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-accent/30 focus:ring-offset-2"
             >
               {scheduleMode === "schedule" ? (

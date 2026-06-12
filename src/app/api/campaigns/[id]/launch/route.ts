@@ -48,20 +48,34 @@ export async function POST(
 
     const campaign = updated;
 
-    // Build audience query
-    let contactQuery = supabase
-      .from("contacts")
-      .select("id, opted_out")
-      .eq("opted_out", false);
+    // Build audience query with pagination to bypass Supabase 1000-row default
+    const eligibleContacts: { id: string }[] = [];
+    const BATCH = 1000;
+    let offset = 0;
+    let hasMore = true;
 
-    if (campaign.audience_type === "tags" && campaign.audience_tags?.length > 0) {
-      contactQuery = contactQuery.overlaps("tags", campaign.audience_tags);
+    while (hasMore) {
+      let contactQuery = supabase
+        .from("contacts")
+        .select("id")
+        .eq("opted_out", false)
+        .range(offset, offset + BATCH - 1);
+
+      if (campaign.audience_type === "tags" && campaign.audience_tags?.length > 0) {
+        contactQuery = contactQuery.overlaps("tags", campaign.audience_tags);
+      }
+
+      const { data: batch, error: contactErr } = await contactQuery;
+      if (contactErr) throw contactErr;
+
+      if (batch && batch.length > 0) {
+        eligibleContacts.push(...batch);
+        offset += BATCH;
+        if (batch.length < BATCH) hasMore = false;
+      } else {
+        hasMore = false;
+      }
     }
-
-    const { data: contacts, error: contactErr } = await contactQuery;
-    if (contactErr) throw contactErr;
-
-    const eligibleContacts = (contacts || []).filter((c) => !c.opted_out);
 
     // Snapshot audience into campaign_recipients
     const recipientRows = eligibleContacts.map((c) => ({
@@ -88,25 +102,36 @@ export async function POST(
     }
 
     if (optedOutCount > 0) {
-      let optedOutQuery = supabase
-        .from("contacts")
-        .select("id")
-        .eq("opted_out", true);
-      if (campaign.audience_type === "tags" && campaign.audience_tags?.length > 0) {
-        optedOutQuery = optedOutQuery.overlaps("tags", campaign.audience_tags);
-      }
-      const { data: optedOut } = await optedOutQuery;
-      if (optedOut) {
-        const skippedRows = optedOut.map((c) => ({
-          campaign_id: id,
-          contact_id: c.id,
-          status: "skipped_opted_out",
-        }));
-        for (let i = 0; i < skippedRows.length; i += 500) {
-          await supabase.from("campaign_recipients").insert(skippedRows.slice(i, i + 500));
+      let ooOffset = 0;
+      let ooHasMore = true;
+      while (ooHasMore) {
+        let optedOutQuery = supabase
+          .from("contacts")
+          .select("id")
+          .eq("opted_out", true)
+          .range(ooOffset, ooOffset + BATCH - 1);
+        if (campaign.audience_type === "tags" && campaign.audience_tags?.length > 0) {
+          optedOutQuery = optedOutQuery.overlaps("tags", campaign.audience_tags);
+        }
+        const { data: optedOut } = await optedOutQuery;
+        if (optedOut && optedOut.length > 0) {
+          const skippedRows = optedOut.map((c) => ({
+            campaign_id: id,
+            contact_id: c.id,
+            status: "skipped_opted_out",
+          }));
+          for (let i = 0; i < skippedRows.length; i += 500) {
+            await supabase.from("campaign_recipients").insert(skippedRows.slice(i, i + 500));
+          }
+          ooOffset += BATCH;
+          if (optedOut.length < BATCH) ooHasMore = false;
+        } else {
+          ooHasMore = false;
         }
       }
     }
+
+    console.log(`[launch] Campaign ${id}: ${eligibleContacts.length} eligible, ${optedOutCount} opted out`);
 
     // Insert pending recipients in chunks
     for (let i = 0; i < recipientRows.length; i += 500) {

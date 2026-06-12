@@ -48,18 +48,32 @@ export async function GET(req: NextRequest) {
       .lte("scheduled_at", now);
 
     for (const camp of scheduledCampaigns || []) {
-      // Snapshot audience into campaign_recipients
-      let contactQuery = supabase
-        .from("contacts")
-        .select("id, opted_out")
-        .eq("opted_out", false);
+      // Snapshot audience into campaign_recipients with pagination
+      const eligible: { id: string }[] = [];
+      const PAGE = 1000;
+      let pageOffset = 0;
+      let moreContacts = true;
 
-      if (camp.audience_type === "tags" && camp.audience_tags?.length > 0) {
-        contactQuery = contactQuery.overlaps("tags", camp.audience_tags);
+      while (moreContacts) {
+        let contactQuery = supabase
+          .from("contacts")
+          .select("id")
+          .eq("opted_out", false)
+          .range(pageOffset, pageOffset + PAGE - 1);
+
+        if (camp.audience_type === "tags" && camp.audience_tags?.length > 0) {
+          contactQuery = contactQuery.overlaps("tags", camp.audience_tags);
+        }
+
+        const { data: batch } = await contactQuery;
+        if (batch && batch.length > 0) {
+          eligible.push(...batch);
+          pageOffset += PAGE;
+          if (batch.length < PAGE) moreContacts = false;
+        } else {
+          moreContacts = false;
+        }
       }
-
-      const { data: contacts } = await contactQuery;
-      const eligible = (contacts || []).filter((c) => !c.opted_out);
 
       const rows = eligible.map((c) => ({
         campaign_id: camp.id,
