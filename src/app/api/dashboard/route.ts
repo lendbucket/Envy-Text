@@ -86,77 +86,103 @@ export async function GET(req: NextRequest) {
       return q;
     })();
 
-    // Actual spend from messages with actual_price
-    const { data: spendData } = await (() => {
-      let q = supabase
-        .from("messages")
-        .select("actual_price, estimated_cost")
-        .eq("direction", "outbound")
-        .in("status", ["sent", "delivered"]);
-      if (dateFilter) q = q.gte("created_at", dateFilter);
-      return q;
-    })();
+    const PAGE = 1000;
 
+    // Actual spend from messages with actual_price (paginated)
     let actualSpend = 0;
     let estimatedSpend = 0;
-    for (const row of spendData || []) {
-      if (row.actual_price) actualSpend += Number(row.actual_price);
-      if (row.estimated_cost) estimatedSpend += Number(row.estimated_cost);
+    {
+      let off = 0;
+      let more = true;
+      while (more) {
+        let q = supabase
+          .from("messages")
+          .select("actual_price, estimated_cost")
+          .eq("direction", "outbound")
+          .in("status", ["sent", "delivered"])
+          .range(off, off + PAGE - 1);
+        if (dateFilter) q = q.gte("created_at", dateFilter);
+        const { data } = await q;
+        for (const row of data || []) {
+          if (row.actual_price) actualSpend += Number(row.actual_price);
+          if (row.estimated_cost) estimatedSpend += Number(row.estimated_cost);
+        }
+        if (!data || data.length < PAGE) more = false;
+        else off += PAGE;
+      }
     }
 
-    // Messages over time (daily buckets, last N days or all time capped at 90 days)
+    // Messages over time (daily buckets, paginated)
     const chartDays = days || 30;
     const chartStart = new Date(Date.now() - chartDays * 24 * 60 * 60 * 1000).toISOString();
 
-    const { data: chartMessages } = await supabase
-      .from("messages")
-      .select("direction, created_at")
-      .gte("created_at", chartStart)
-      .order("created_at", { ascending: true });
-
     const dailyMessages: Record<string, { outbound: number; inbound: number }> = {};
-    for (const msg of chartMessages || []) {
-      const day = msg.created_at.slice(0, 10);
-      if (!dailyMessages[day]) dailyMessages[day] = { outbound: 0, inbound: 0 };
-      dailyMessages[day][msg.direction as "outbound" | "inbound"]++;
+    {
+      let off = 0;
+      let more = true;
+      while (more) {
+        const { data } = await supabase
+          .from("messages")
+          .select("direction, created_at")
+          .gte("created_at", chartStart)
+          .order("created_at", { ascending: true })
+          .range(off, off + PAGE - 1);
+        for (const msg of data || []) {
+          const day = msg.created_at.slice(0, 10);
+          if (!dailyMessages[day]) dailyMessages[day] = { outbound: 0, inbound: 0 };
+          dailyMessages[day][msg.direction as "outbound" | "inbound"]++;
+        }
+        if (!data || data.length < PAGE) more = false;
+        else off += PAGE;
+      }
     }
 
-    // Spend over time (daily buckets)
+    // Spend over time (daily buckets, paginated)
     const dailySpend: Record<string, number> = {};
-    for (const msg of spendData || []) {
-      // We need created_at for these -- refetch with dates
+    {
+      let off = 0;
+      let more = true;
+      while (more) {
+        const { data } = await supabase
+          .from("messages")
+          .select("actual_price, estimated_cost, created_at")
+          .eq("direction", "outbound")
+          .in("status", ["sent", "delivered"])
+          .gte("created_at", chartStart)
+          .order("created_at", { ascending: true })
+          .range(off, off + PAGE - 1);
+        for (const msg of data || []) {
+          const day = msg.created_at.slice(0, 10);
+          if (!dailySpend[day]) dailySpend[day] = 0;
+          dailySpend[day] += Number(msg.actual_price || msg.estimated_cost || 0);
+        }
+        if (!data || data.length < PAGE) more = false;
+        else off += PAGE;
+      }
     }
 
-    const { data: spendTimeline } = await supabase
-      .from("messages")
-      .select("actual_price, estimated_cost, created_at")
-      .eq("direction", "outbound")
-      .in("status", ["sent", "delivered"])
-      .gte("created_at", chartStart)
-      .order("created_at", { ascending: true });
-
-    for (const msg of spendTimeline || []) {
-      const day = msg.created_at.slice(0, 10);
-      if (!dailySpend[day]) dailySpend[day] = 0;
-      dailySpend[day] += Number(msg.actual_price || msg.estimated_cost || 0);
-    }
-
-    // Failure breakdown by error code
-    const { data: failures } = await (() => {
-      let q = supabase
-        .from("messages")
-        .select("error_code")
-        .eq("direction", "outbound")
-        .eq("status", "failed")
-        .not("error_code", "is", null);
-      if (dateFilter) q = q.gte("created_at", dateFilter);
-      return q;
-    })();
-
+    // Failure breakdown by error code (paginated)
     const errorBreakdown: Record<string, number> = {};
-    for (const row of failures || []) {
-      const code = row.error_code || "unknown";
-      errorBreakdown[code] = (errorBreakdown[code] || 0) + 1;
+    {
+      let off = 0;
+      let more = true;
+      while (more) {
+        let q = supabase
+          .from("messages")
+          .select("error_code")
+          .eq("direction", "outbound")
+          .eq("status", "failed")
+          .not("error_code", "is", null)
+          .range(off, off + PAGE - 1);
+        if (dateFilter) q = q.gte("created_at", dateFilter);
+        const { data } = await q;
+        for (const row of data || []) {
+          const code = row.error_code || "unknown";
+          errorBreakdown[code] = (errorBreakdown[code] || 0) + 1;
+        }
+        if (!data || data.length < PAGE) more = false;
+        else off += PAGE;
+      }
     }
 
     const outboundTotal = totalSent || 0;

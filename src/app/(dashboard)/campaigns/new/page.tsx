@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Send, Clock, FlaskConical } from "lucide-react";
 import { analyzeMessage, estimateCost } from "@/lib/sms/segments";
@@ -14,13 +14,18 @@ interface Pricing {
   carrier_fee_per_mms: number;
 }
 
+interface TagInfo {
+  tag: string;
+  count: number;
+}
+
 export default function CampaignComposePage() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [body, setBody] = useState("");
   const [audienceType, setAudienceType] = useState<"all" | "tags">("all");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [allTags, setAllTags] = useState<string[]>([]);
+  const [allTags, setAllTags] = useState<TagInfo[]>([]);
   const [appendOptOut, setAppendOptOut] = useState(true);
   const [approved, setApproved] = useState(false);
   const [scheduleMode, setScheduleMode] = useState<"now" | "schedule">("now");
@@ -40,11 +45,27 @@ export default function CampaignComposePage() {
   const [testResult, setTestResult] = useState("");
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
 
+  const fetchTags = useCallback(() => {
+    fetch("/api/contacts/tags")
+      .then((r) => r.json())
+      .then((d) => setAllTags(d.tags || []))
+      .catch(() => {});
+  }, []);
+
   // Fetch tags and pricing on mount
   useEffect(() => {
-    fetch("/api/contacts/tags").then((r) => r.json()).then((d) => setAllTags(d.tags || [])).catch(() => {});
+    fetchTags();
     fetch("/api/pricing").then((r) => r.json()).then(setPricing).catch(() => {});
-  }, []);
+  }, [fetchTags]);
+
+  // Refetch tags when page regains focus
+  useEffect(() => {
+    function handleFocus() {
+      fetchTags();
+    }
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [fetchTags]);
 
   // Fetch recipient count when audience changes using server-side counts
   useEffect(() => {
@@ -339,17 +360,17 @@ export default function CampaignComposePage() {
                       No tags found. Tag your contacts first.
                     </p>
                   ) : (
-                    allTags.map((tag) => (
+                    allTags.map((t) => (
                       <button
-                        key={tag}
-                        onClick={() => toggleTag(tag)}
+                        key={t.tag}
+                        onClick={() => toggleTag(t.tag)}
                         className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors focus:outline-none focus:ring-2 focus:ring-accent/30 ${
-                          selectedTags.includes(tag)
+                          selectedTags.includes(t.tag)
                             ? "bg-accent text-white border-accent"
                             : "bg-panel text-secondary border-border hover:border-accent/40"
                         }`}
                       >
-                        {tag}
+                        {t.tag} ({t.count.toLocaleString()})
                       </button>
                     ))
                   )}

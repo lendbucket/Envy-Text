@@ -28,7 +28,8 @@ export async function GET(req: NextRequest) {
           notes
         )
       `)
-      .order("last_message_at", { ascending: false });
+      .order("last_message_at", { ascending: false })
+      .limit(500);
 
     if (unreadOnly) {
       query = query.gt("unread_count", 0);

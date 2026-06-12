@@ -43,7 +43,7 @@ export default function ContactsPage() {
   const [search, setSearch] = useState("");
   const [sortField, setSortField] = useState<SortField>("created_at");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
-  const [allTags, setAllTags] = useState<string[]>([]);
+  const [allTags, setAllTags] = useState<{ tag: string; count: number }[]>([]);
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editContact, setEditContact] = useState<Contact | null>(null);
@@ -105,7 +105,12 @@ export default function ContactsPage() {
     try {
       const res = await fetch("/api/contacts/tags");
       const data = await res.json();
-      setAllTags(data.tags || []);
+      setAllTags(
+        (data.tags || []).map((t: { tag: string; count: number }) => ({
+          tag: t.tag,
+          count: t.count,
+        }))
+      );
     } catch {
       // Silently handle
     }
@@ -293,18 +298,18 @@ export default function ContactsPage() {
       {/* Tag filter chips */}
       {allTags.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-4">
-          {allTags.map((tag) => (
+          {allTags.map((t) => (
             <button
-              key={tag}
-              onClick={() => toggleTag(tag)}
+              key={t.tag}
+              onClick={() => toggleTag(t.tag)}
               className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors focus:outline-none focus:ring-2 focus:ring-accent/30 ${
-                activeTags.includes(tag)
+                activeTags.includes(t.tag)
                   ? "bg-accent text-white border-accent"
                   : "bg-panel text-secondary border-border hover:border-accent/40 hover:text-primary"
               }`}
             >
-              {tag}
-              {activeTags.includes(tag) && (
+              {t.tag} ({t.count.toLocaleString()})
+              {activeTags.includes(t.tag) && (
                 <X className="w-3 h-3 inline ml-1" />
               )}
             </button>
