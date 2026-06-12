@@ -18,13 +18,23 @@ export async function POST(req: NextRequest) {
     params[key] = String(value);
   });
 
-  // Validate Twilio signature
+  // Validate Twilio signature.
+  // Reconstruct the URL from the actual request headers so it matches
+  // exactly what Twilio called, regardless of env var mismatches, proxies,
+  // or trailing-slash differences.
   const signature = req.headers.get("x-twilio-signature") || "";
-  const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://text.salonenvyusa.com").replace(/\/$/, "");
-  const webhookUrl = `${appUrl}/api/twilio/status`;
+  const proto = (req.headers.get("x-forwarded-proto") || "https").split(",")[0].trim();
+  const host = req.headers.get("host") || "";
+  const webhookUrl = `${proto}://${host}/api/twilio/status`;
 
   if (!validateSignature(webhookUrl, params, signature)) {
-    return NextResponse.json({ error: "Invalid signature" }, { status: 403 });
+    // Fallback: try the env-var URL in case the host header differs
+    const envUrl = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
+    const fallbackUrl = envUrl ? `${envUrl}/api/twilio/status` : "";
+    if (!fallbackUrl || !validateSignature(fallbackUrl, params, signature)) {
+      console.error(`[status] Signature validation failed. Tried: ${webhookUrl} and ${fallbackUrl}`);
+      return NextResponse.json({ error: "Invalid signature" }, { status: 403 });
+    }
   }
 
   const twilioSid = params.MessageSid || "";

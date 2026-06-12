@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Send via Twilio
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://text.salonenvyusa.com";
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://text.salonenvyusa.com").replace(/\/$/, "");
     try {
       const result = await sendMessage({
         to: contact.phone,

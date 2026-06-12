@@ -46,7 +46,7 @@ export async function POST(
     });
     body = applyOptOutSuffix(body, campaign.append_opt_out !== false);
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://text.salonenvyusa.com";
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://text.salonenvyusa.com").replace(/\/$/, "");
 
     await sendMessage({
       to: testPhone,
