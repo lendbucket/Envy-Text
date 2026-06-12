@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
+import { getUsageSpend } from "@/lib/twilio/usage";
 
 export async function GET(req: NextRequest) {
   const days = parseInt(req.nextUrl.searchParams.get("days") || "0", 10);
@@ -88,8 +89,12 @@ export async function GET(req: NextRequest) {
 
     const PAGE = 1000;
 
-    // Actual spend from messages with actual_price (paginated)
-    let actualSpend = 0;
+    // Actual spend from twilio_usage table (invoice-accurate, includes carrier fees)
+    const usageStartDate = dateFilter ? dateFilter.slice(0, 10) : null;
+    const usageSpend = await getUsageSpend(supabase, usageStartDate);
+    const hasUsageData = usageSpend.totalSpend > 0;
+
+    // Fallback: estimated spend from per-message data
     let estimatedSpend = 0;
     {
       let off = 0;
@@ -97,14 +102,13 @@ export async function GET(req: NextRequest) {
       while (more) {
         let q = supabase
           .from("messages")
-          .select("actual_price, estimated_cost")
+          .select("estimated_cost")
           .eq("direction", "outbound")
           .in("status", ["sent", "delivered"])
           .range(off, off + PAGE - 1);
         if (dateFilter) q = q.gte("created_at", dateFilter);
         const { data } = await q;
         for (const row of data || []) {
-          if (row.actual_price) actualSpend += Number(row.actual_price);
           if (row.estimated_cost) estimatedSpend += Number(row.estimated_cost);
         }
         if (!data || data.length < PAGE) more = false;
@@ -199,7 +203,10 @@ export async function GET(req: NextRequest) {
       deliveredRate,
       failedCount: failedCount || 0,
       failedRate,
-      actualSpend,
+      actualSpend: usageSpend.totalSpend,
+      messageCharges: usageSpend.messageCharges,
+      carrierFees: usageSpend.carrierFees,
+      hasUsageData,
       estimatedSpend,
       optOutCount: optOutCount || 0,
       optOutRate,

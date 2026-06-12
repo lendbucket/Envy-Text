@@ -3,6 +3,7 @@ import { timingSafeEqual } from "crypto";
 import { createServerClient } from "@/lib/supabase/server";
 import { sendMessage } from "@/lib/twilio/client";
 import { reconcileStaleRows } from "@/lib/twilio/reconcile";
+import { syncRecentUsage } from "@/lib/twilio/usage";
 import { renderMergeFields } from "@/lib/sms/merge";
 import { applyOptOutSuffix, isWithinQuietHours } from "@/lib/sms/compliance";
 import { extractUrls, generateShortCode, replaceUrlsWithTracked } from "@/lib/sms/links";
@@ -281,10 +282,34 @@ export async function GET(req: NextRequest) {
     // This self-heals missed status callbacks (e.g. from signature rejections).
     const reconcile = await reconcileStaleRows(supabase, 30);
 
+    // Step 4: Sync Twilio usage records once per hour.
+    // Check the most recent sync time; only run if >55 minutes ago.
+    let usageSynced = 0;
+    {
+      const { data: lastSync } = await supabase
+        .from("twilio_usage")
+        .select("synced_at")
+        .order("synced_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      const lastSyncTime = lastSync?.synced_at ? new Date(lastSync.synced_at).getTime() : 0;
+      const minutesSinceSync = (Date.now() - lastSyncTime) / 60000;
+
+      if (minutesSinceSync > 55) {
+        try {
+          usageSynced = await syncRecentUsage(supabase);
+        } catch (err) {
+          console.error("[cron] Usage sync error:", (err as Error).message);
+        }
+      }
+    }
+
     return NextResponse.json({
       processed: totalProcessed,
       reconciled: reconcile.updated,
       reconciled_checked: reconcile.checked,
+      usageSynced,
     });
   } catch (err) {
     console.error("[cron] Unhandled error:", (err as Error).message);

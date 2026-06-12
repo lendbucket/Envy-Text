@@ -300,15 +300,15 @@ export default function CampaignDetailPage() {
         <h3 className="text-sm font-semibold text-primary uppercase tracking-wide mb-3">
           Cost
         </h3>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
           <div>
-            <p className="text-secondary">Estimated</p>
+            <p className="text-secondary">Estimated total</p>
             <p className="text-primary font-medium tabular-nums">
               ${(campaign.estimated_cost || 0).toFixed(2)}
             </p>
           </div>
           <div>
-            <p className="text-secondary">Actual (Twilio)</p>
+            <p className="text-secondary">Twilio message charges</p>
             <p className="text-primary font-medium tabular-nums">
               {campaign.actual_cost_total > 0
                 ? `$${campaign.actual_cost_total.toFixed(2)}`
@@ -316,19 +316,32 @@ export default function CampaignDetailPage() {
             </p>
           </div>
           <div>
-            <p className="text-secondary">Variance</p>
+            <p className="text-secondary">Est. carrier fees</p>
             <p className="text-primary font-medium tabular-nums">
-              {campaign.actual_cost_total > 0
-                ? `$${((campaign.estimated_cost || 0) - campaign.actual_cost_total).toFixed(2)}`
-                : "N/A"}
+              {campaign.actual_sent > 0
+                ? `$${(campaign.actual_sent * 0.003).toFixed(2)}`
+                : "Pending"}
+            </p>
+            <p className="text-[10px] text-secondary mt-0.5">
+              Based on settings rate; exact fees post at account level
             </p>
           </div>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm mt-3 pt-3 border-t border-border">
           <div>
             <p className="text-secondary">Sent / failed</p>
             <p className="text-primary font-medium tabular-nums">
               {campaign.actual_sent} sent, {campaign.actual_failed} failed
             </p>
           </div>
+          {campaign.actual_cost_total > 0 && (
+            <div>
+              <p className="text-secondary">Variance from estimate</p>
+              <p className="text-primary font-medium tabular-nums">
+                ${((campaign.estimated_cost || 0) - campaign.actual_cost_total).toFixed(2)}
+              </p>
+            </div>
+          )}
         </div>
       </div>
 

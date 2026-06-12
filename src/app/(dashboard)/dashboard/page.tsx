@@ -10,6 +10,9 @@ interface DashboardData {
   failedCount: number;
   failedRate: number;
   actualSpend: number;
+  messageCharges: number;
+  carrierFees: number;
+  hasUsageData: boolean;
   estimatedSpend: number;
   optOutCount: number;
   optOutRate: number;
@@ -116,11 +119,22 @@ export default function DashboardPage() {
           sub={`${data.failedCount.toLocaleString()} failed`}
           warn={data.failedRate > 5}
         />
-        <KpiCard
-          label="Actual spend"
-          value={`$${data.actualSpend > 0 ? data.actualSpend.toFixed(2) : data.estimatedSpend.toFixed(2)}`}
-          sub={data.actualSpend > 0 ? "from Twilio prices" : "estimated"}
-        />
+        <div className="bg-panel rounded-xl border border-border p-4 group relative">
+          <p className="text-2xl font-semibold tabular-nums text-primary">
+            ${data.hasUsageData ? data.actualSpend.toFixed(2) : data.estimatedSpend.toFixed(2)}
+          </p>
+          <p className="text-xs text-secondary mt-1">Actual spend</p>
+          <p className="text-[10px] text-secondary tabular-nums">
+            {data.hasUsageData ? "from Twilio usage records" : "estimated"}
+          </p>
+          {data.hasUsageData && (
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-primary text-white text-[10px] px-3 py-2 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10 tabular-nums">
+              <p>Message charges: ${data.messageCharges.toFixed(2)}</p>
+              <p>Carrier fees: ${data.carrierFees.toFixed(2)}</p>
+              <p className="border-t border-white/20 mt-1 pt-1">Total: ${data.actualSpend.toFixed(2)}</p>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
