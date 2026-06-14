@@ -1,6 +1,30 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { TrendingUp, TrendingDown, Minus } from "lucide-react";
+
+interface CampaignVariance {
+  campaignId: string;
+  campaignName: string;
+  completedAt: string;
+  estimatedCost: number;
+  actualCost: number;
+  variance: number;
+  variancePct: number;
+}
+
+interface CalibrationData {
+  calibrated_sms_rate: number | null;
+  calibrated_mms_rate: number | null;
+  sample_size: number;
+  updated_at: string | null;
+  pinned: boolean;
+  manual_sms_rate: number;
+  manual_mms_rate: number;
+  sms_drift_pct: number | null;
+  mms_drift_pct: number | null;
+  variance_trend: CampaignVariance[];
+}
 
 interface DashboardData {
   totalSent: number;
@@ -51,6 +75,7 @@ const RANGE_OPTIONS = [
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [calibration, setCalibration] = useState<CalibrationData | null>(null);
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState(0);
 
@@ -63,6 +88,13 @@ export default function DashboardPage() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [days]);
+
+  useEffect(() => {
+    fetch("/api/calibration")
+      .then((r) => r.json())
+      .then(setCalibration)
+      .catch(() => {});
+  }, []);
 
   if (loading || !data) {
     return (
@@ -159,6 +191,139 @@ export default function DashboardPage() {
           sub={data.actualSpend > 0 ? "estimate variance" : "no actual data yet"}
         />
       </div>
+
+      {/* Cost calibration panel */}
+      {calibration && (
+        <div className="bg-panel rounded-xl border border-border p-5 mb-6">
+          <h3 className="text-sm font-semibold text-primary uppercase tracking-wide mb-4">
+            Cost calibration
+          </h3>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+            {/* SMS rate */}
+            <div>
+              <p className="text-xs text-secondary mb-1">SMS per segment</p>
+              <p className="text-lg font-semibold text-primary tabular-nums">
+                {calibration.calibrated_sms_rate !== null
+                  ? `$${calibration.calibrated_sms_rate.toFixed(4)}`
+                  : "---"}
+              </p>
+              <p className="text-[10px] text-secondary tabular-nums">
+                Manual: ${calibration.manual_sms_rate.toFixed(4)}
+              </p>
+              {calibration.sms_drift_pct !== null && (
+                <span className={`inline-flex items-center gap-0.5 text-[10px] font-medium mt-0.5 ${
+                  Math.abs(calibration.sms_drift_pct) < 5 ? "text-delivered" :
+                  Math.abs(calibration.sms_drift_pct) < 15 ? "text-scheduled" : "text-failed"
+                }`}>
+                  {calibration.sms_drift_pct > 0 ? <TrendingUp className="w-3 h-3" /> :
+                   calibration.sms_drift_pct < 0 ? <TrendingDown className="w-3 h-3" /> :
+                   <Minus className="w-3 h-3" />}
+                  {calibration.sms_drift_pct > 0 ? "+" : ""}{calibration.sms_drift_pct.toFixed(1)}% vs manual
+                </span>
+              )}
+            </div>
+
+            {/* MMS rate */}
+            <div>
+              <p className="text-xs text-secondary mb-1">MMS per message</p>
+              <p className="text-lg font-semibold text-primary tabular-nums">
+                {calibration.calibrated_mms_rate !== null
+                  ? `$${calibration.calibrated_mms_rate.toFixed(4)}`
+                  : "---"}
+              </p>
+              <p className="text-[10px] text-secondary tabular-nums">
+                Manual: ${calibration.manual_mms_rate.toFixed(4)}
+              </p>
+              {calibration.mms_drift_pct !== null && (
+                <span className={`inline-flex items-center gap-0.5 text-[10px] font-medium mt-0.5 ${
+                  Math.abs(calibration.mms_drift_pct) < 5 ? "text-delivered" :
+                  Math.abs(calibration.mms_drift_pct) < 15 ? "text-scheduled" : "text-failed"
+                }`}>
+                  {calibration.mms_drift_pct > 0 ? <TrendingUp className="w-3 h-3" /> :
+                   calibration.mms_drift_pct < 0 ? <TrendingDown className="w-3 h-3" /> :
+                   <Minus className="w-3 h-3" />}
+                  {calibration.mms_drift_pct > 0 ? "+" : ""}{calibration.mms_drift_pct.toFixed(1)}% vs manual
+                </span>
+              )}
+            </div>
+
+            {/* Sample size */}
+            <div>
+              <p className="text-xs text-secondary mb-1">Sample size</p>
+              <p className="text-lg font-semibold text-primary tabular-nums">
+                {calibration.sample_size} campaign{calibration.sample_size !== 1 ? "s" : ""}
+              </p>
+              <p className="text-[10px] text-secondary">
+                {calibration.updated_at
+                  ? `Updated ${new Date(calibration.updated_at).toLocaleDateString()}`
+                  : "Not yet calibrated"}
+              </p>
+            </div>
+
+            {/* Status */}
+            <div>
+              <p className="text-xs text-secondary mb-1">Status</p>
+              <p className={`text-lg font-semibold ${calibration.pinned ? "text-scheduled" : calibration.sample_size > 0 ? "text-delivered" : "text-secondary"}`}>
+                {calibration.pinned ? "Pinned" : calibration.sample_size > 0 ? "Active" : "Pending"}
+              </p>
+              <p className="text-[10px] text-secondary">
+                {calibration.pinned
+                  ? "Using manual rates (override)"
+                  : calibration.sample_size > 0
+                  ? "Using calibrated rates"
+                  : "Waiting for campaign data"}
+              </p>
+            </div>
+          </div>
+
+          {/* Estimated vs actual variance trend */}
+          {calibration.variance_trend.length > 0 && (
+            <div className="border-t border-border pt-4">
+              <p className="text-xs font-medium text-primary mb-3">
+                Estimated vs actual cost per campaign
+              </p>
+              <div className="space-y-1.5">
+                {calibration.variance_trend.map((v) => {
+                  const maxCost = Math.max(v.estimatedCost, v.actualCost, 0.01);
+                  const estW = (v.estimatedCost / maxCost) * 100;
+                  const actW = (v.actualCost / maxCost) * 100;
+                  return (
+                    <div key={v.campaignId} className="group relative">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-secondary w-24 truncate shrink-0" title={v.campaignName}>
+                          {v.campaignName}
+                        </span>
+                        <div className="flex-1 flex flex-col gap-0.5">
+                          <div className="h-2 bg-scheduled/30 rounded-full" style={{ width: `${estW}%` }} />
+                          <div className="h-2 bg-delivered/50 rounded-full" style={{ width: `${actW}%` }} />
+                        </div>
+                        <span className={`text-[10px] font-medium tabular-nums w-14 text-right shrink-0 ${
+                          Math.abs(v.variancePct) < 10 ? "text-delivered" :
+                          Math.abs(v.variancePct) < 25 ? "text-scheduled" : "text-failed"
+                        }`}>
+                          {v.variancePct > 0 ? "+" : ""}{v.variancePct.toFixed(0)}%
+                        </span>
+                      </div>
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 bg-primary text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10 tabular-nums">
+                        Est: ${v.estimatedCost.toFixed(2)} | Actual: ${v.actualCost.toFixed(2)} | Diff: ${v.variance > 0 ? "+" : ""}{v.variance.toFixed(2)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex items-center gap-4 mt-2 text-[10px] text-secondary">
+                <span className="flex items-center gap-1">
+                  <span className="w-3 h-1.5 bg-scheduled/30 rounded-full" /> Estimated
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-3 h-1.5 bg-delivered/50 rounded-full" /> Actual
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Messages over time chart */}
       {data.messagesOverTime.length > 0 && (

@@ -11,6 +11,10 @@ interface SettingsData {
   test_phone_number: string;
   twilio_phone_number: string;
   webhook_url: string;
+  calibration_pinned: string;
+  calibrated_sms_rate: string;
+  calibrated_mms_rate: string;
+  calibration_sample_size: string;
 }
 
 export default function SettingsPage() {
@@ -55,6 +59,7 @@ export default function SettingsPage() {
           carrier_fee_per_sms: settings.carrier_fee_per_sms,
           carrier_fee_per_mms: settings.carrier_fee_per_mms,
           test_phone_number: settings.test_phone_number,
+          calibration_pinned: settings.calibration_pinned,
         }),
       });
 
@@ -249,6 +254,61 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
+        </section>
+
+        {/* Calibration override */}
+        <section className="bg-panel rounded-xl border border-border p-6">
+          <h3 className="text-sm font-semibold text-primary uppercase tracking-wide mb-4">
+            Cost calibration
+          </h3>
+          <p className="text-xs text-secondary mb-4">
+            The system automatically calibrates cost estimates from your actual Twilio bills.
+            Enable the override below to ignore calibration and always use your manual pricing rates.
+          </p>
+
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <p className="text-sm font-medium text-primary">
+                Pin manual rates
+              </p>
+              <p className="text-xs text-secondary">
+                When enabled, cost estimates always use the manual pricing above, ignoring calibrated rates.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (!settings) return;
+                const newVal = settings.calibration_pinned === "true" ? "false" : "true";
+                setSettings({ ...settings, calibration_pinned: newVal });
+              }}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-accent/30 ${
+                settings?.calibration_pinned === "true" ? "bg-accent" : "bg-border"
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform ${
+                  settings?.calibration_pinned === "true" ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+
+          {settings && settings.calibrated_sms_rate && settings.calibrated_sms_rate !== "null" && (
+            <div className="bg-canvas rounded-lg border border-border p-3 text-xs text-secondary space-y-1">
+              <p className="tabular-nums">
+                Calibrated SMS rate: ${parseFloat(settings.calibrated_sms_rate).toFixed(4)}/segment
+              </p>
+              {settings.calibrated_mms_rate && settings.calibrated_mms_rate !== "null" && (
+                <p className="tabular-nums">
+                  Calibrated MMS rate: ${parseFloat(settings.calibrated_mms_rate).toFixed(4)}/message
+                </p>
+              )}
+              <p>
+                Based on {settings.calibration_sample_size || "0"} completed campaign{settings.calibration_sample_size !== "1" ? "s" : ""}
+              </p>
+            </div>
+          )}
         </section>
 
         {/* Test phone */}

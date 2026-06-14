@@ -4,6 +4,7 @@ import { createServerClient } from "@/lib/supabase/server";
 import { sendMessage } from "@/lib/twilio/client";
 import { reconcileStaleRows } from "@/lib/twilio/reconcile";
 import { syncRecentUsage } from "@/lib/twilio/usage";
+import { recalibrateRates } from "@/lib/sms/calibration";
 import { renderMergeFields } from "@/lib/sms/merge";
 import { applyOptOutSuffix, isWithinQuietHours } from "@/lib/sms/compliance";
 import { extractUrls, generateShortCode, replaceUrlsWithTracked } from "@/lib/sms/links";
@@ -305,11 +306,26 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Step 5: Recalibrate cost rates after usage sync.
+    let calibration = null;
+    if (usageSynced > 0) {
+      try {
+        calibration = await recalibrateRates(supabase);
+      } catch (err) {
+        console.error("[cron] Calibration error:", (err as Error).message);
+      }
+    }
+
     return NextResponse.json({
       processed: totalProcessed,
       reconciled: reconcile.updated,
       reconciled_checked: reconcile.checked,
       usageSynced,
+      calibration: calibration ? {
+        smsRate: calibration.smsRate,
+        mmsRate: calibration.mmsRate,
+        sampleSize: calibration.sampleSize,
+      } : null,
     });
   } catch (err) {
     console.error("[cron] Unhandled error:", (err as Error).message);

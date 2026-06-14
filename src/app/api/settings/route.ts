@@ -8,6 +8,7 @@ const EDITABLE_KEYS = [
   "carrier_fee_per_sms",
   "carrier_fee_per_mms",
   "test_phone_number",
+  "calibration_pinned",
 ] as const;
 
 const updateSchema = z.object({
@@ -16,6 +17,7 @@ const updateSchema = z.object({
   carrier_fee_per_sms: z.string().optional(),
   carrier_fee_per_mms: z.string().optional(),
   test_phone_number: z.string().optional(),
+  calibration_pinned: z.string().optional(),
 });
 
 export async function GET() {

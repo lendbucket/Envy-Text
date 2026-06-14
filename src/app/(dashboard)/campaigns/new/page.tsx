@@ -7,11 +7,26 @@ import { analyzeMessage, estimateCost, findNonGsmChars, replaceSmartChars } from
 import { OPT_OUT_SUFFIX } from "@/lib/sms/compliance";
 import { ImageUpload } from "@/components/image-upload";
 
+interface CalibrationInfo {
+  calibrated_sms_rate: number | null;
+  calibrated_mms_rate: number | null;
+  sample_size: number;
+  updated_at: string | null;
+  pinned: boolean;
+  manual_sms_rate: number;
+  manual_mms_rate: number;
+  effective_sms_rate: number;
+  effective_mms_rate: number;
+  sms_source: "calibrated" | "manual";
+  mms_source: "calibrated" | "manual";
+}
+
 interface Pricing {
   sms_price_per_segment: number;
   mms_price: number;
   carrier_fee_per_sms: number;
   carrier_fee_per_mms: number;
+  calibration?: CalibrationInfo | null;
 }
 
 interface TagInfo {
@@ -92,9 +107,27 @@ export default function CampaignComposePage() {
   // Segment and cost analysis on the effective body
   const hasMedia = !!mediaUrl;
   const segmentInfo = useMemo(() => analyzeMessage(effectiveBody, hasMedia), [effectiveBody, hasMedia]);
+
+  // Build effective pricing: if calibrated rates are active, back-compute
+  // per-segment and per-message prices so estimateCost produces the calibrated total.
+  const effectivePricing = useMemo(() => {
+    const cal = pricing.calibration;
+    if (!cal) return pricing;
+    return {
+      // When calibrated SMS rate is active, the blended rate already includes
+      // carrier fees, so we put the full rate in sms_price_per_segment and zero the carrier fee.
+      sms_price_per_segment: cal.sms_source === "calibrated"
+        ? cal.effective_sms_rate : pricing.sms_price_per_segment,
+      carrier_fee_per_sms: cal.sms_source === "calibrated" ? 0 : pricing.carrier_fee_per_sms,
+      mms_price: cal.mms_source === "calibrated"
+        ? cal.effective_mms_rate : pricing.mms_price,
+      carrier_fee_per_mms: cal.mms_source === "calibrated" ? 0 : pricing.carrier_fee_per_mms,
+    };
+  }, [pricing]);
+
   const cost = useMemo(
-    () => estimateCost(effectiveBody, hasMedia, recipientCount, pricing),
-    [effectiveBody, hasMedia, recipientCount, pricing]
+    () => estimateCost(effectiveBody, hasMedia, recipientCount, effectivePricing),
+    [effectiveBody, hasMedia, recipientCount, effectivePricing]
   );
 
   // Non-GSM character detection for "Why this price" breakdown
@@ -116,13 +149,13 @@ export default function CampaignComposePage() {
   const cleanedCost = useMemo(
     () =>
       hasReplaceableChars
-        ? estimateCost(cleanedBody, hasMedia, recipientCount, pricing)
+        ? estimateCost(cleanedBody, hasMedia, recipientCount, effectivePricing)
         : cost,
-    [cleanedBody, hasMedia, recipientCount, pricing, hasReplaceableChars, cost]
+    [cleanedBody, hasMedia, recipientCount, effectivePricing, hasReplaceableChars, cost]
   );
 
   // Check if long text-only SMS would be cheaper as MMS
-  const mmsCostPerRecipient = pricing.mms_price + pricing.carrier_fee_per_mms;
+  const mmsCostPerRecipient = effectivePricing.mms_price + effectivePricing.carrier_fee_per_mms;
   const showMmsHint = !hasMedia && segmentInfo.segmentCount > 1 &&
     cost.costPerRecipient > mmsCostPerRecipient;
 
@@ -476,11 +509,52 @@ export default function CampaignComposePage() {
 
             {showPriceBreakdown && effectiveBody.length > 0 && (
               <div className="mt-3 pt-3 border-t border-border space-y-3 text-xs">
+                {/* Calibration source badge */}
+                {pricing.calibration && (
+                  <div className={`px-3 py-2 rounded-lg ${
+                    (hasMedia ? pricing.calibration.mms_source : pricing.calibration.sms_source) === "calibrated"
+                      ? "bg-delivered/10 border border-delivered/20"
+                      : "bg-scheduled/10 border border-scheduled/20"
+                  }`}>
+                    {(hasMedia ? pricing.calibration.mms_source : pricing.calibration.sms_source) === "calibrated" ? (
+                      <>
+                        <p className="text-delivered font-medium">
+                          Estimate based on your actual costs from the last {pricing.calibration.sample_size} campaign{pricing.calibration.sample_size !== 1 ? "s" : ""}
+                        </p>
+                        <p className="text-secondary mt-1 tabular-nums">
+                          Calibrated rate: ${hasMedia
+                            ? pricing.calibration.effective_mms_rate.toFixed(4)
+                            : pricing.calibration.effective_sms_rate.toFixed(4)
+                          }/{hasMedia ? "message" : "segment"}
+                          {" | "}Manual rate: ${hasMedia
+                            ? pricing.calibration.manual_mms_rate.toFixed(4)
+                            : pricing.calibration.manual_sms_rate.toFixed(4)
+                          }/{hasMedia ? "message" : "segment"}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-scheduled font-medium">
+                          Estimate based on manual settings rate{pricing.calibration.pinned ? " (pinned)" : ""}
+                        </p>
+                        <p className="text-secondary mt-1">
+                          {pricing.calibration.pinned
+                            ? "Manual override is enabled in settings."
+                            : "Send more campaigns to calibrate."}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                )}
+
                 {hasMedia ? (
                   <div className="text-secondary">
                     <p>MMS is a flat rate per message regardless of body length.</p>
                     <p className="tabular-nums mt-1">
-                      Message fee: ${pricing.mms_price.toFixed(4)} + carrier fee: ${pricing.carrier_fee_per_mms.toFixed(4)} = ${mmsCostPerRecipient.toFixed(4)} per recipient
+                      {pricing.calibration?.mms_source === "calibrated"
+                        ? `Calibrated rate: $${mmsCostPerRecipient.toFixed(4)} per recipient`
+                        : `Message fee: $${pricing.mms_price.toFixed(4)} + carrier fee: $${pricing.carrier_fee_per_mms.toFixed(4)} = $${mmsCostPerRecipient.toFixed(4)} per recipient`
+                      }
                     </p>
                   </div>
                 ) : (
@@ -500,7 +574,7 @@ export default function CampaignComposePage() {
                         </p>
                       )}
                       <p className="tabular-nums">
-                        Per recipient: {segmentInfo.segmentCount} x (${pricing.sms_price_per_segment.toFixed(4)} + ${pricing.carrier_fee_per_sms.toFixed(4)}) = ${cost.costPerRecipient.toFixed(4)}
+                        Per recipient: {segmentInfo.segmentCount} x ${cost.costPerRecipient > 0 ? (cost.costPerRecipient / segmentInfo.segmentCount).toFixed(4) : "0.0000"}/segment = ${cost.costPerRecipient.toFixed(4)}
                       </p>
                     </div>
 
